@@ -35,12 +35,14 @@ namespace Project.Gameplay
         #region Private Fields
         private Rigidbody2D rb;
         private Vector2 moveInput;
+        private AITest.Player.PlayerHideController hideController; // ? Hiding check
         #endregion
 
         #region Unity Lifecycle
         private void Awake()
         {
             rb = GetComponent<Rigidbody2D>();
+            hideController = GetComponent<AITest.Player.PlayerHideController>(); // ? Get hide controller
             
             // 2D top-down için gravity kapalý
             rb.gravityScale = 0f;
@@ -54,6 +56,14 @@ namespace Project.Gameplay
 
         private void Update()
         {
+            // ? CRITICAL: Block input if hiding!
+            if (hideController != null && hideController.IsHiding)
+            {
+                moveInput = Vector2.zero;
+                isSprinting = false;
+                return; // ? Skip input reading!
+            }
+            
             // Input okuma
             float horizontal = Input.GetAxisRaw("Horizontal"); // A/D or Left/Right Arrow
             float vertical = Input.GetAxisRaw("Vertical");     // W/S or Up/Down Arrow
@@ -62,10 +72,25 @@ namespace Project.Gameplay
 
             // Sprint kontrolü
             isSprinting = Input.GetKey(sprintKey);
+            
+            // ? DEBUG: Input kontrolü
+            if (moveInput.sqrMagnitude > 0.01f)
+            {
+                Debug.Log($"<color=cyan>[PlayerMovement2D] Input: {moveInput}, Speed: {currentSpeed}</color>");
+            }
         }
 
         private void FixedUpdate()
         {
+            // ? CRITICAL: Force freeze if hiding!
+            if (hideController != null && hideController.IsHiding)
+            {
+                rb.linearVelocity = Vector2.zero;
+                rb.angularVelocity = 0f;
+                currentSpeed = 0f;
+                return; // ? Skip movement!
+            }
+            
             // Hedef hýz
             float targetSpeed = isSprinting ? sprintSpeed : walkSpeed;
             Vector2 targetVelocity = moveInput * targetSpeed;
