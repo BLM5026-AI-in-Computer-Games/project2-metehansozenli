@@ -64,7 +64,6 @@
     <Compile Include="Assets\_Project\Scripts\Editor\CleanupMissingScripts.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Editor\SectorizerAutoSetup.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Editor\SectorCoordinateHelper.cs" />
-    <Compile Include="Assets\_Project\Scripts\Editor\PerceptionMigrationTool.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="UnityEngine">

@@ -9,7 +9,8 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProductVersion>10.0.20506</ProductVersion>
     <SchemaVersion>2.0</SchemaVersion>
-    <RootNamespace></RootNamespace>
+    <RootNamespace>
+    </RootNamespace>
     <ProjectGuid>{70F7D00C-C2AA-32B7-9E6C-9B8455A64718}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
@@ -61,32 +62,71 @@
     <Analyzer Include="C:\Program Files\Unity\Hub\Editor\6000.2.8f1\Editor\Data\Tools\Unity.SourceGenerators\Unity.UIToolkit.SourceGenerator.dll" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Assets\_Project\Scripts\AI_Test\Core\Pathfinder.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\EnemyBrain.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Player\NPC_Player\IBotMover2D.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\World\IntersectionPoint.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Core\Pathfinder.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\WorldModel\EnemyWorldModel.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\Options\HeatSearchOption.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\World\RoomGraphSO.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\EnemyMover2D.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Player\NPC_Player\PlayerTrainingBotController.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\HidingSpotTracker.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Sector\SectorData.cs" />
     <Compile Include="Assets\_Project\Scripts\Gameplay\Player\player_script.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\Options\SweepOption.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\ThreatPerceptron.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\RLStateKey.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\SectorAgent.cs" />
-    <Compile Include="Assets\_Project\Scripts\AI_Test\Utils\Logger.cs" />
-    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\BehaviorState.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\QLearningPolicy.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Perception\ClueEventBus.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\WorldModel\HeatmapModel.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\Options\HideSpotCheckOption.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\Options\InvestigateOption.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Quest\QuestManager.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\UI\DebugVisualizer.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\EnemyContext.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\EnemyMode.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Core\ClueEventBus.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\BaseOption.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Player\PlayerStatsMonitor.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Player\NPC_Player\BotThreadModel.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\PerceptronScorer.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\EpisodeManager.cs" />
     <Compile Include="Assets\_Project\Scripts\Gameplay\Player\PlayerMovement2D.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\World\RoomGraphManager.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\IEnemyOption.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\ActionMasker.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Sector\Sectorizer.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Core\NoiseBus.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\World\WorldRegistry.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Perception\ClueEmitter.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\Options\AmbushOption.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\UI\LearningMetrics.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\World\RoomZone.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\FeatureExtractor.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\World\HideSpot.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\StateExtractor.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Player\PlayerController.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Player\PlayerStatsCache.cs" />
-    <Compile Include="Assets\_Project\Scripts\AI_Test\UI\LearningHUD.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\TrainingBot.cs" />
     <Compile Include="Assets\_Project\Scripts\Systems\HeatmapDrawer.cs" />
-    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\ActionPlanner.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Quest\QuestInteractable.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\EnemyController.cs" />
-    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\RLState.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\RewardCalculator.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\WorldModel\HeatmapDebugDrawer.cs" />
     <Compile Include="Assets\_Project\Scripts\Systems\HeatmapSystem.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Perception\Perception.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Player\PlayerHideController.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\TargetTypes.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Core\LightSensor.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\TargetSelector.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Player\NPC_Player\SafePoint.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\ChaseExecutor.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\SimpleStateExtractor.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Core\HeatmapTracker.cs" />
     <Compile Include="Assets\_Project\Scripts\AI_Test\Player\NoiseEmitter.cs" />
-    <Compile Include="Assets\_Project\Scripts\AI_Test\Learning\QLearner.cs" />
+    <Compile Include="Assets\_Project\Scripts\AI_Test\Enemy\Options\PatrolOption.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\TextMesh Pro\Shaders\TMPro.cginc" />
