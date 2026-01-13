@@ -1,604 +1,729 @@
 ﻿using UnityEngine;
 using AITest.Learning;
-using AITest.Perception;
-using AITest.Sector;
-using AITest.Core;
-using AITest.Utils;
+using System.Collections.Generic; // ? PROMPT 16: For List<EnemyMode>
+using System.Linq; // For Max() on arrays
+using Metrics; // ✅ NEW: Metrics system
 
 namespace AITest.Enemy
 {
     /// <summary>
-    /// Düşman beyin sistemi - Q-Learning ile davranış optimizasyonu
+    /// Enemy Brain - Q-Learning decision controller
     /// 
-    /// RAPOR SİSTEMİ:
-    /// "Düşmanın yüksek düzey davranış kararlarını yönetir. Her eylemin sonucunda aldığı
-    /// ödül veya ceza üzerinden çevresine uyum sağlamayı öğrenir. Bu süreçte devriye,
-    /// arama ve kovalamaca vb. gibi davranış durumları optimize edilir; böylece düşman,
-    /// deneyim biriktirerek en etkili stratejileri geliştirir."
+    /// PROMPT 10: SMDP Training Loop
+    /// - Maintains current option
+    /// - Extracts state ? chooses action ? executes option
+    /// - On completion: compute reward ? update Q ? repeat
+    /// - Handles interrupts (SeePlayer, HearNoise)
     /// </summary>
     public class EnemyBrain : MonoBehaviour
     {
         [Header("Components")]
-        public Perception.Perception perception;
-        public QLearner qLearner;
-        public ActionPlanner actionPlanner;
-        public SectorAgent sectorAgent;
-        public Sectorizer sectorizer;
-        public ThreatPerceptron threatPerceptron;
-        public LightSensor lightSensor;
-        public AITest.Utils.Logger logger;
+        public EnemyContext context;
+        public StateExtractor stateExtractor;
+        public SimpleStateExtractor simpleStateExtractor; // ✅ NEW: Simple MDP
+        public QLearningPolicy qLearningPolicy; // ✅ Renamed from qLearning
+        public RewardCalculator rewardCalculator;
+        public ChaseExecutor chaseExecutor; // ? PROMPT 14: Chase system
+        public ActionMasker actionMasker; // ? PROMPT 16: Action masking
 
-        [Header("Decision")]
-        public float decisionInterval = 0.5f; // Her 0.5s'de bir karar
+        [Header("Options (7 total - AmbushOption removed)")]
+        public PatrolOption patrolOption;
+        public InvestigateOption investigateOption;
+        public HeatSearchOption heatSearchOption;
+        public SweepOption sweepOption;
+        public HideSpotCheckOption hideSpotCheckOption;
+        public HeatSweepOption heatSweepOption;
+        public AmbushHotChokeOption ambushHotChokeOption;
 
-        [Header("Behavior System (Rapor)")]
-        [Tooltip("Mevcut davranış durumu (Devriye/Arama/Kovalamaca)")]
-        public BehaviorState currentBehavior = BehaviorState.Patrol;
-        
-        [Tooltip("Davranış değişim eşikleri")]
-        public float chaseTimeThreshold = 5f;    // 0-5s: Kovalamaca
-        public float searchTimeThreshold = 30f;  // 5-30s: Arama
-        // 30s+: Devriye
+        [Header("Learning Settings")]
+        [Tooltip("Enable Q-learning (false = heuristic only)")]
+        public bool enableLearning = true;
 
-        [Header("Rewards (Davranış Optimizasyonu)")]
-        public float rewardPlayerCaught = 2.0f;      // Büyük ödül!
-        public float rewardClueFound = 0.3f;         // Ipucu bulma
-        public float rewardCorrectBehavior = 0.1f;   // Doğru davranış seçimi
-        public float penaltyWrongBehavior = -0.2f;   // Yanlış davranış
-        public float penaltyIdleTime = -0.02f;       // Boşta kalma
-        
-        [Header("Proximity Rewards (Tiered)")]
-        [Tooltip("10m içine girme bonusu (bir kez)")]
-        public float proximityTier1Reward = 0.15f;   // ⚡ YENİ: Medium range
-        
-        [Tooltip("5m içine girme bonusu (bir kez)")]
-        public float proximityTier2Reward = 0.30f;   // ⚡ YENİ: Close range
-        
-        [Tooltip("Proximity reward aktif mi?")]
-        public bool useProximityRewards = true;      // ⚡ YENİ: Toggle
+        [Tooltip("Use simple state extractor (486 states) instead of full (497k states)")]
+        public bool useSimpleStateExtractor = true; // 
 
-        [Header("Threat Assessment (Perceptron)")]
-        [Tooltip("Tehdit değerlendirmesi aktif mi?")]
-        public bool useThreatAssessment = true;
-        
-        [Tooltip("Tehdit skorunu reward'a uygula")]
-        public bool applyThreatToReward = true;
+        [Tooltip("Explore during execution (?-greedy)")]
+        public bool explore = true;
 
-        [Header("Learning Control")]
-        public bool learningEnabled = true;
+        [Tooltip("Auto-save Q-table every N episodes")]
+        [Range(0, 100)] public int autoSaveInterval = 10;
 
-        // State tracking
-        private BehaviorState lastBehavior;
-        private RLState lastState;
-        private float nextDecisionTime;
-        private float sessionStartTime;
-        private bool playerCaptured;
-        private bool captureRewardGiven;
-        
-        // ⚡ Proximity tracking (tiered)
-        private bool proximityTier1Reached = false;  // 10m içi
-        private bool proximityTier2Reached = false;  // 5m içi
-        private float previousMinDistance = float.MaxValue;
-        private Vector2 previousPosition; // ⚡ YENİ: Mesafe farkı için
-        private float previousDistanceToTarget = float.MaxValue; // ⚡ YENİ: Approach reward
+        [Header("Debug")]
+        public bool showDebugLogs = true;
 
-        // Statistics
-        public int TotalDecisions { get; private set; }
-        public int SuccessfulCaptures { get; private set; }
-        public float CaptureTime { get; private set; }
+        // State
+        private IEnemyOption currentOption;
+        private RLStateKey lastState; // For full state
+        public int lastStateKey; 
+        public EnemyMode currentMode; 
+        private EnemyMode lastAction;
+        private float optionStartTime;
+
+        private void OnEnable()
+        {
+            // ⚡ Force component to stay enabled
+            if (!this.enabled)
+            {
+                this.enabled = true;
+                Debug.LogWarning("[EnemyBrain] Component was disabled! Force enabling...");
+            }
+        }
 
         private void Awake()
         {
-            if (!perception) perception = GetComponent<Perception.Perception>();
-            if (!qLearner) qLearner = GetComponent<QLearner>();
-            if (!actionPlanner) actionPlanner = GetComponent<ActionPlanner>();
-            if (!sectorAgent) sectorAgent = GetComponent<SectorAgent>();
-            if (!sectorizer) sectorizer = Sectorizer.Instance;
-            if (!threatPerceptron) threatPerceptron = GetComponent<ThreatPerceptron>();
-            if (!lightSensor) lightSensor = GetComponent<LightSensor>();
-            if (!logger) logger = GetComponent<AITest.Utils.Logger>();
-            
-            sessionStartTime = Time.time;
+            // ⚡ Force enable (safety check)
+            this.enabled = true;
+
+            // Auto-find components
+            if (!context) context = GetComponent<EnemyContext>();
+            if (!stateExtractor) stateExtractor = GetComponent<StateExtractor>();
+            if (!simpleStateExtractor) simpleStateExtractor = GetComponent<SimpleStateExtractor>(); // ✅ NEW
+            if (!rewardCalculator) rewardCalculator = GetComponent<RewardCalculator>();
+            if (!chaseExecutor) chaseExecutor = GetComponent<ChaseExecutor>(); // ⚡ PROMPT 14
+            if (!actionMasker) actionMasker = GetComponent<ActionMasker>(); // ⚡ PROMPT 16
+
+            // Auto-find options
+            if (!patrolOption) patrolOption = GetComponent<PatrolOption>();
+            if (!investigateOption) investigateOption = GetComponent<InvestigateOption>();
+            if (!heatSearchOption) heatSearchOption = GetComponent<HeatSearchOption>();
+            if (!sweepOption) sweepOption = GetComponent<SweepOption>();
+            if (!hideSpotCheckOption) hideSpotCheckOption = GetComponent<HideSpotCheckOption>();
+            // if (!ambushOption) ambushOption = GetComponent<AmbushOption>(); // ❌ REMOVED
+            if (!heatSweepOption) heatSweepOption = GetComponent<HeatSweepOption>(); // ✅ NEW
+            if (!ambushHotChokeOption) ambushHotChokeOption = GetComponent<AmbushHotChokeOption>(); // ✅ NEW
+
+            // Initialize Q-learning
+            if (qLearningPolicy == null)
+            {
+                qLearningPolicy = new QLearningPolicy();
+            }
+
+            // ? USER REQUEST: Reset Q-table on Play Start (Fresh Session), 
+            // but keep learning across episodes within the session.
+            qLearningPolicy.ResetQTable();
+            Debug.Log("<color=yellow>[EnemyBrain] Q-table RESET for fresh learning session (User Request)</color>");
+
+            // ? PERSISTENCE DISABLED (Uncomment to load saved data)
+            /*
+            if (enableLearning)
+            {
+                string filename = useSimpleStateExtractor ? "qtable_simple" : "qtable";
+                if (PlayerPrefs.HasKey(filename))
+                {
+                    qLearningPolicy.LoadQTable(filename);
+                }
+            }
+            */
+
+            // ⚡ PROMPT 14: Subscribe to capture event
+            if (chaseExecutor)
+            {
+                chaseExecutor.OnPlayerCaptured += OnPlayerCaptured;
+            }
+
+            // ⚡ Debug log
+            if (showDebugLogs)
+                Debug.Log("<color=lime>[EnemyBrain] Awake complete - Component ENABLED</color>");
         }
 
         private void Start()
         {
-            nextDecisionTime = Time.time + 1.0f;
-            lastState = BuildState();
-            lastBehavior = BehaviorState.Patrol;
-            currentBehavior = BehaviorState.Patrol;
-            
-            playerCaptured = false;
-            captureRewardGiven = false;
-            TotalDecisions = 0;
-            SuccessfulCaptures = 0;
-            CaptureTime = 0f;
-            sessionStartTime = Time.time;
-            
-            // ⚡ Reset proximity tracking
-            proximityTier1Reached = false;
-            proximityTier2Reached = false;
-            previousMinDistance = float.MaxValue;
-            previousPosition = transform.position; // ⚡ YENİ
-            previousDistanceToTarget = float.MaxValue; // ⚡ YENİ
-
-            if (qLearner)
-            {
-                qLearner.ResetLearning();
-            }
-            
-            Debug.Log("<color=lime>[EnemyBrain] 🧠 Behavior learning system initialized (Patrol/Search/Chase)</color>");
+            // Start with first option
+            StartNewOption();
         }
 
         private void Update()
         {
-            if (Input.GetKeyDown(KeyCode.L)) learningEnabled = !learningEnabled;
-            if (Input.GetKeyDown(KeyCode.T)) useThreatAssessment = !useThreatAssessment;
-
-            // Yakalama kontrolü
-            if (!playerCaptured && perception && perception.PlayerVisible && perception.player)
+            // ? PROMPT 14: HARD INTERRUPT - Chase takes priority
+            if (chaseExecutor && context.CanSeePlayer())
             {
-                float distanceToPlayer = Vector2.Distance(transform.position, perception.player.position);
-                if (distanceToPlayer < 1.5f)
+                if (!chaseExecutor.IsChasing)
                 {
-                    playerCaptured = true;
-                    captureRewardGiven = false;
-                    CaptureTime = Time.time - sessionStartTime;
-                    SuccessfulCaptures++;
-                    
-                    Debug.Log($"<color=lime>[EnemyBrain] ★★★ PLAYER CAPTURED in {CaptureTime:F1}s! Total captures: {SuccessfulCaptures}</color>");
-                    Debug.Log($"<color=lime>[EnemyBrain] 📊 Successful behavior: {currentBehavior}</color>");
-                    
-                    // ⚡ Train threat perceptron on successful capture
-                    if (useThreatAssessment && threatPerceptron)
+                        // Start chase (pause current option)
+                    if (currentOption != null)
                     {
-                        TrainThreatPerceptron(1.0f); // High threat (player was there!)
+                        // ✅ NEW: Credit assignment for Chase Interruption
+                        HandleInterruptReward("SeePlayer (Chase)");
+                        currentOption.Stop(context);
+
+                        if (showDebugLogs)
+                            Debug.Log("<color=red>[EnemyBrain] HARD INTERRUPT: CHASE STARTED!</color>");
+                    }
+
+                    chaseExecutor.StartChase();
+                }
+
+                // Update chase
+                ChaseStatus chaseStatus = chaseExecutor.UpdateChase();
+
+                if (chaseStatus == ChaseStatus.Captured)
+                {
+                    // ? Captured - handled by OnPlayerCaptured event
+                    return;
+                }
+                else if (chaseStatus == ChaseStatus.Lost)
+                {
+                    // ? Lost target - resume options
+                    if (showDebugLogs)
+                        Debug.Log("<color=yellow>[EnemyBrain] Chase ended - resuming options</color>");
+
+                    StartNewOption();
+                }
+
+                return; // Chase is active, skip option ticking
+            }
+
+            // ? Normal option execution
+            if (currentOption == null)
+                return;
+
+            // ? Tick current option
+            OptionStatus status = currentOption.Tick(context, Time.deltaTime);
+
+            // ? Check for interrupts
+            if (CheckForInterrupts())
+                return; // Already switched
+
+            // ? Handle completion
+            if (status != OptionStatus.Running)
+            {
+                OnOptionCompleted(status);
+            }
+        }
+
+        /// <summary>
+        /// ? PROMPT 10: Start new option (Q-learning cycle)
+        /// </summary>
+        private void StartNewOption()
+        {
+            // ? 1. Extract state (SIMPLE or FULL)
+            int stateKey;
+
+            if (useSimpleStateExtractor && simpleStateExtractor)
+            {
+                // ✅ Use simple state (54 states)
+                var simpleState = simpleStateExtractor.ExtractState();
+                stateKey = simpleState.GetHashKey();
+            }
+            else if (stateExtractor)
+            {
+                // Use full state (497k states)
+                RLStateKey state = stateExtractor.ExtractState();
+                stateKey = state.ToPackedInt();
+            }
+            else
+            {
+                Debug.LogError("[EnemyBrain] No state extractor found!");
+                return;
+            }
+
+            // ? 2. Choose action (Q-learning or heuristic)
+            EnemyMode action;
+
+            if (enableLearning)
+            {
+                // ? PROMPT 16: Get valid actions (action masking)
+                List<EnemyMode> validActions = null;
+                if (actionMasker)
+                {
+                    // ✅ Use appropriate state for action masking
+                    if (useSimpleStateExtractor && simpleStateExtractor)
+                    {
+                        // Use SimpleRLStateKey for masking
+                        var simpleState = simpleStateExtractor.ExtractState();
+                        validActions = actionMasker.GetValidActions(simpleState);
+                    }
+                    else if (stateExtractor)
+                    {
+                        // Use RLStateKey for masking
+                        var fullState = stateExtractor.ExtractState();
+                        validActions = actionMasker.GetValidActions(fullState);
                     }
                 }
+
+                action = qLearningPolicy.ChooseAction(stateKey, explore, validActions);
             }
-
-            // Karar döngüsü
-            if (Time.time >= nextDecisionTime)
-            {
-                nextDecisionTime = Time.time + decisionInterval;
-                DecisionLoop();
-            }
-        }
-
-        /// <summary>
-        /// Ana karar döngüsü - Q-Learning ile davranış seçimi
-        /// </summary>
-        private void DecisionLoop()
-        {
-            TotalDecisions++;
-            
-            RLState s = BuildState();
-            
-            // ⚡ Q-LEARNING: Davranış seçimi (3 davranış: Patrol/Search/Chase)
-            BehaviorState behavior = ChooseBehavior(s);
-            
-            // Q-value before update
-            float qBefore = GetBehaviorQValue(s, behavior);
-
-            // Davranışı execute et
-            // ⚡ FIX: Chase için özel durum - IsExecuting kontrolü yok!
-            bool isUrgentChase = behavior == BehaviorState.Chase && perception && perception.PlayerVisible;
-            
-            if (actionPlanner && (!actionPlanner.IsExecuting || isUrgentChase))
-            {
-                ExecuteBehavior(behavior);
-            }
-            else if (isUrgentChase)
-            {
-                Debug.Log($"<color=yellow>[EnemyBrain] ⚠️ Chase blocked by IsExecuting! Forcing execution...</color>");
-                ExecuteBehavior(behavior); // Force execute chase!
-            }
-            
-            // Reward hesapla
-            float reward = ComputeBehaviorReward(behavior);
-            
-            // Yeni state
-            RLState s2 = BuildState();
-
-            // ⚡ Q-LEARNING: Güncelle
-            if (learningEnabled)
-            {
-                UpdateBehaviorQ(s, behavior, reward, s2);
-            }
-
-            // Q-value after update
-            float qAfter = GetBehaviorQValue(s2, behavior);
-            float tdError = qAfter - qBefore;
-            
-            // Log
-            if (logger)
-            {
-                LogBehaviorDecision(s, behavior, reward, qBefore, qAfter, tdError);
-            }
-
-            // State güncelle
-            lastState = s2;
-            lastBehavior = behavior;
-            currentBehavior = behavior;
-        }
-
-        /// <summary>
-        /// State inşa et (Q-Learning için)
-        /// </summary>
-        private RLState BuildState()
-        {
-            var s = new RLState
-            {
-                enemySectorId = sectorizer?.GetIdByPosition(transform.position) ?? "None",
-                lastSeenSectorId = perception ? perception.LastSeenSectorId : "None",
-                lastHeardSectorId = perception ? perception.LastHeardSectorId : "None",
-                timeSinceContactBucket = RLState.GetTimeBucket(perception ? perception.TimeSinceContact : 999f),
-                playerStyleBucket = AITest.Player.PlayerStatsCache.CurrentBucket
-            };
-            return s;
-        }
-
-        /// <summary>
-        /// ⚡ YENİ: Davranış seçimi (Q-Learning)
-        /// State'e göre en iyi davranışı seç (Patrol/Search/Chase)
-        /// </summary>
-        private BehaviorState ChooseBehavior(RLState state)
-        {
-            // Time-based heuristic (başlangıç bias)
-            float timeSinceContact = perception ? perception.TimeSinceContact : 999f;
-            
-            // ⚡ DÜZELTME: RL'den direkt behavior al (mod 3 YOK artık!)
-            // QL earner action space = 3 (Patrol, Search, Chase)
-            RLAction rlAction = qLearner.ChooseAction(state);
-            BehaviorState behavior;
-            
-            // ⚡ Açık eşleme (mod yerine)
-            if (rlAction == RLAction.Patrol || (int)rlAction == 4) // Patrol or explicit 4
-                behavior = BehaviorState.Patrol;
-            else if (rlAction == RLAction.GoToLastSeen || rlAction == RLAction.GoToLastHeard || (int)rlAction == 0 || (int)rlAction == 1)
-                behavior = BehaviorState.Chase; // Chase-related actions
-            else if (rlAction == RLAction.SweepNearest3 || (int)rlAction == 2)
-                behavior = BehaviorState.Search;
             else
-                behavior = BehaviorState.Patrol; // Fallback
-            
-            // ⚡ Heuristic override SADECE ilk 10 decision (50 → 10)
-            if (qLearner.GetQTableSize() < 10) // İlk 10 state
             {
-                if (timeSinceContact < chaseTimeThreshold)
-                    behavior = BehaviorState.Chase;
-                else if (timeSinceContact < searchTimeThreshold)
-                    behavior = BehaviorState.Search;
-                else
-                    behavior = BehaviorState.Patrol;
+                var fullState = stateExtractor ? stateExtractor.ExtractState() : new RLStateKey();
+                action = ChooseActionHeuristic(fullState);
             }
-            
-            Debug.Log($"<color=cyan>[EnemyBrain] 🎯 Behavior: {behavior} (timeSinceContact={timeSinceContact:F1}s, ε={qLearner.CurrentEpsilon:F2})</color>");
-            
-            return behavior;
-        }
 
-        /// <summary>
-        /// Davranışı execute et
-        /// </summary>
-        private void ExecuteBehavior(BehaviorState behavior)
-        {
-            string targetSector = null;
-            
-            switch (behavior)
+            // ? 3. Get option for action
+            IEnemyOption option = GetOptionForAction(action);
+
+            if (option == null)
             {
-                case BehaviorState.Chase:
-                    // ⚡ REAL-TIME CHASE: Player görünüyorsa direkt pozisyonunu takip et!
-                    if (perception && perception.PlayerVisible && perception.player)
+                Debug.LogError($"[EnemyBrain] No option found for action {action}!");
+                return;
+            }
+
+            // ? 4. Start option
+            SwitchOption(option);
+
+            // ? 5. Save state/action for Q-update
+            lastStateKey = stateKey; // ✅ Save for episode manager
+            lastAction = action;
+            currentMode = action; // ✅ Update current mode
+            optionStartTime = Time.time;
+
+            // ✅ Record action selection in metrics
+            MetricsHooks.ActionSelected((int)action, action.ToString());
+
+            // ? Debug log
+            if (showDebugLogs)
+            {
+                float[] qValues = qLearningPolicy.GetQValues(stateKey);
+
+                Debug.Log($"<color=cyan>[EnemyBrain] ===== NEW OPTION =====</color>");
+                Debug.Log($"  State Key: {stateKey} ({(useSimpleStateExtractor ? "SIMPLE" : "FULL")})");
+                Debug.Log($"  Action: {action} (ε={qLearningPolicy.epsilon:F3})");
+                
+                // Show state details
+                if (useSimpleStateExtractor && simpleStateExtractor)
+                {
+                    var simpleState = simpleStateExtractor.ExtractState();
+                    Debug.Log($"  State: {simpleState}");
+                }
+
+                // ? PROMPT 16: Show masked actions
+                if (actionMasker)
+                {
+                    var maskReasons = actionMasker.GetAllMaskReasons();
+                    if (maskReasons.Count > 0)
                     {
-                        // Player görünüyor - gerçek zamanlı takip!
-                        Vector2 playerPos = perception.player.position;
-                        actionPlanner.Execute(RLAction.GoToLastSeen, null); // Action başlat
-                        
-                        Debug.Log($"<color=yellow>[EnemyBrain] 🎯 REAL-TIME CHASE: Tracking player at {playerPos}</color>");
-                    }
-                    else if (perception && perception.LastSeenSectorId != "None")
-                    {
-                        // Player kayboldu - son görülen pozisyona git
-                        targetSector = perception.LastSeenSectorId;
-                        actionPlanner.Execute(RLAction.GoToLastSeen, targetSector);
-                        Debug.Log($"<color=yellow>[EnemyBrain] 🏃 CHASE: Going to last seen at {targetSector}</color>");
-                    }
-                    else if (perception && perception.LastHeardSectorId != "None")
-                    {
-                        // Ses vardı - oraya git
-                        targetSector = perception.LastHeardSectorId;
-                        actionPlanner.Execute(RLAction.GoToLastHeard, targetSector);
-                        Debug.Log($"<color=yellow>[EnemyBrain] 👂 CHASE: Going to last heard at {targetSector}</color>");
-                    }
-                    break;
-                    
-                case BehaviorState.Search:
-                    // ⚡ AKILLI ARAMA: Hotspot varsa oraya git, yoksa sweep yap
-                    if (perception && perception.LastSeenSectorId != "None")
-                    {
-                        targetSector = perception.LastSeenSectorId;
-                        
-                        // Hotspot kontrolü (player'ın sık durduğu yerler)
-                        if (HeatmapTracker.Instance)
+                        Debug.Log($"  Masked actions:");
+                        foreach (var kvp in maskReasons)
                         {
-                            var hotspots = HeatmapTracker.Instance.GetTopHotspots(3, 0.15f);
-                            
-                            if (hotspots.Count > 0)
-                            {
-                                // Hotspot'lara git (en yoğundan başla)
-                                Debug.Log($"<color=orange>[EnemyBrain] 🔍 SEARCH: {hotspots.Count} hotspots found, investigating...</color>");
-                                // Not: ActionPlanner'da hotspot rotası kullanılacak
-                            }
+                            Debug.Log($"    {kvp.Key}: {kvp.Value}");
                         }
+                    }
+                }
+
+                if (showDebugLogs)
+                {
+                    _debugLastQStr = string.Join(", ", System.Array.ConvertAll(qValues, q => q.ToString("F2")));
+                    
+                    // Decode state for readability
+                    if (useSimpleStateExtractor)
+                    {
+                        var s = simpleStateExtractor.ExtractState();
+                        string vis = s.playerVisible == 1 ? "YES" : "NO";
+                        string dist = s.distanceBucket == 0 ? "CLOSE" : (s.distanceBucket == 1 ? "MED" : "FAR");
+                        string sect = s.lastSeenSector == 0 ? "SAME" : (s.lastSeenSector == 1 ? "DIFF" : "UNK");
+                        string time = s.timeSinceContactBucket == 0 ? "NEW" : (s.timeSinceContactBucket == 1 ? "OLD" : "V.OLD");
+                        string heatH = s.heatHereBucket == 0 ? "COLD" : (s.heatHereBucket == 1 ? "WARM" : "HOT");
+                        string heatN = s.heatNearbyBucket == 0 ? "COLD" : (s.heatNearbyBucket == 1 ? "WARM" : "HOT");
                         
-                        actionPlanner.Execute(RLAction.SweepNearest3, targetSector);
-                        Debug.Log($"<color=orange>[EnemyBrain] 🔍 SEARCH: Sweeping sector {targetSector}</color>");
+                        _debugLastStateStr = $"Vis:{vis} Dist:{dist} Sect:{sect} Time:{time} Heat:{heatH}/{heatN}";
                     }
                     else
                     {
-                        // Heatmap'ten en yoğun sektörü seç
-                        targetSector = GetHighestHeatmapSector();
-                        
-                        if (!string.IsNullOrEmpty(targetSector))
-                        {
-                            actionPlanner.Execute(RLAction.SweepNearest3, targetSector);
-                            Debug.Log($"<color=orange>[EnemyBrain] 🔍 SEARCH: Sweeping heatmap sector {targetSector}</color>");
-                        }
+                        _debugLastStateStr = "FullState(Hidden)";
                     }
-                    break;
-                    
-                case BehaviorState.Patrol:
-                    // Devriye: Heatmap-based dinamik rota
-                    actionPlanner.Execute(RLAction.Patrol, null);
-                    Debug.Log($"<color=cyan>[EnemyBrain] 👮 PATROL: Dynamic route (heatmap-based)</color>");
-                    break;
-            }
-        }
-
-        /// <summary>
-        /// En yoğun sektörü bul (heatmap)
-        /// </summary>
-        private string GetHighestHeatmapSector()
-        {
-            if (!HeatmapTracker.Instance || sectorizer == null || sectorizer.sectors == null)
-                return "A"; // Fallback
-            
-            string bestSector = "A";
-            float maxDensity = 0f;
-            
-            foreach (var sector in sectorizer.sectors)
-            {
-                if (sector == null) continue;
-                
-                float density = HeatmapTracker.Instance.GetDensityAt(sector.bounds.center);
-                if (density > maxDensity)
-                {
-                    maxDensity = density;
-                    bestSector = sector.id;
                 }
             }
-            
-            return bestSector;
         }
 
         /// <summary>
-        /// ⚡ Davranış reward'ı hesapla (öğrenme için)
+        /// ? PROMPT 10: Option completed ? Q-update ? next option
         /// </summary>
-        private float ComputeBehaviorReward(BehaviorState behavior)
+        private void OnOptionCompleted(OptionStatus status)
         {
-            float r = 0f;
+            float duration = Time.time - optionStartTime;
 
-            // 1. YAKALAMA ÖDÜLÜ (en büyük!)
-            if (playerCaptured && !captureRewardGiven)
-            {
-                r += rewardPlayerCaught; // +2.0
-                captureRewardGiven = true;
-                Debug.Log($"<color=lime>[EnemyBrain] ★ CAPTURE REWARD: +{rewardPlayerCaught} (behavior={behavior})</color>");
-            }
+            // ? 1. Compute reward
+            float reward = rewardCalculator.ComputeReward(status, lastAction, duration, context);
 
-            // 2. IPUCU BULMA ÖDÜLÜ
-            if (perception && perception.TimeSinceContact < 5f)
-            {
-                r += rewardClueFound; // +0.3
-            }
+            // ? 2. Extract next state
+            int nextStateKey;
 
-            // 3. DAVRANIŞA UYGUN EYLEM ÖDÜLÜ
-            float timeSinceContact = perception ? perception.TimeSinceContact : 999f;
-            
-            if (behavior == BehaviorState.Chase && timeSinceContact < chaseTimeThreshold)
+            if (useSimpleStateExtractor && simpleStateExtractor)
             {
-                r += rewardCorrectBehavior; // +0.1 (doğru zaman)
+                var simpleState = simpleStateExtractor.ExtractState();
+                nextStateKey = simpleState.GetHashKey();
             }
-            else if (behavior == BehaviorState.Search && timeSinceContact >= chaseTimeThreshold && timeSinceContact < searchTimeThreshold)
+            else if (stateExtractor)
             {
-                r += rewardCorrectBehavior;
-            }
-            else if (behavior == BehaviorState.Patrol && timeSinceContact >= searchTimeThreshold)
-            {
-                r += rewardCorrectBehavior;
+                RLStateKey nextState = stateExtractor.ExtractState();
+                nextStateKey = nextState.ToPackedInt();
             }
             else
             {
-                r += penaltyWrongBehavior; // -0.2 (yanlış zaman)
+                nextStateKey = 0;
             }
 
-            // 4. IDLE CEZASI
-            r += penaltyIdleTime * decisionInterval; // -0.02 * 0.5s
-            
-            // ⚡ 5. TIERED PROXIMITY REWARD (Kademeli yaklaşma bonusu)
-            if (useProximityRewards && behavior == BehaviorState.Chase && perception && perception.PlayerVisible && perception.player)
+            // ? 3. Q-learning update
+            if (enableLearning)
             {
-                float distance = Vector2.Distance(transform.position, perception.player.position);
-                
-                // Tier 2: 5m içi (close range) - En değerli!
-                if (distance < 5f && !proximityTier2Reached)
-                {
-                    r += proximityTier2Reward; // +0.30 (bir kez)
-                    proximityTier2Reached = true;
-                    Debug.Log($"<color=yellow>[EnemyBrain] 🎯 TIER 2 PROXIMITY: +{proximityTier2Reward} (dist={distance:F1}m - CLOSE!)</color>");
-                }
-                // Tier 1: 10m içi (medium range)
-                else if (distance < 10f && !proximityTier1Reached)
-                {
-                    r += proximityTier1Reward; // +0.15 (bir kez)
-                    proximityTier1Reached = true;
-                    Debug.Log($"<color=yellow>[EnemyBrain] 🎯 TIER 1 PROXIMITY: +{proximityTier1Reward} (dist={distance:F1}m)</color>");
-                }
-                
-                // Monotonic check: Sadece yaklaştığında ekstra bonus
-                if (distance < previousMinDistance)
-                {
-                    float approachBonus = 0.02f; // Küçük sürekli bonus (exploit önleme)
-                    r += approachBonus;
-                    previousMinDistance = distance;
-                }
-
-                // ⚡ Mesafe bazlı yoğun ödül (yakınsa daha fazla ödül)
-                float distanceToPlayer = Vector2.Distance(transform.position, perception.player.position);
-                if (distanceToPlayer < 3f)
-                {
-                    r += 0.1f; // Çok yakınsa ek ödül
-                }
-                else if (distanceToPlayer < 5f)
-                {
-                    r += 0.05f; // Yakınsa biraz ödül
-                }
+                qLearningPolicy.UpdateQ(lastStateKey, lastAction, reward, nextStateKey, duration);
             }
-            
-            // 6. THREAT MODULATION (Perceptron output)
-            if (applyThreatToReward && threatPerceptron && useThreatAssessment)
+
+            // ? 4. Update state extractor (last action)
+            if (stateExtractor)
+                stateExtractor.SetLastAction(lastAction);
+            if (simpleStateExtractor)
+                simpleStateExtractor.SetLastAction(lastAction);
+
+            // ? Debug log
+            if (showDebugLogs)
             {
-                float threatScore = ComputeThreatScore();
-                float multiplier = threatPerceptron.GetRewardMultiplier();
-                r *= multiplier; // 0.7x - 1.5x based on threat
-                
-                // Train perceptron
-                float targetThreat = CalculateTargetThreat();
-                TrainThreatPerceptron(targetThreat);
+                string breakdown = rewardCalculator.GetRewardBreakdown(status, lastAction, duration, context).Replace("\n", " | ");
+                Debug.Log($"<color=lime>[AI RESULT]</color> Action: <b>{lastAction}</b> -> Status: {status} -> Reward: <b>{reward:F2}</b> | {breakdown}");
             }
 
-            // ⚡ Reset proximity tiers when behavior changes
-            if (behavior != BehaviorState.Chase)
+            // ? 5. Start next option
+            StartNewOption();
+        }
+
+        /// <summary>
+        /// Check for interrupts (SeePlayer, HearNoise)
+        /// </summary>
+        private bool CheckForInterrupts()
+        {
+            if (currentOption == null)
+                return false;
+
+            // ? PRIORITY 1: SeePlayer (always)
+            if (context.CanSeePlayer())
             {
-                if (proximityTier1Reached || proximityTier2Reached)
+                if (currentOption.CanBeInterruptedBy(InterruptType.SeePlayer))
                 {
-                    Debug.Log($"<color=cyan>[EnemyBrain] 🔄 Proximity tiers reset (behavior={behavior})</color>");
+                    if (showDebugLogs)
+                        Debug.Log("<color=red>[EnemyBrain] INTERRUPT: SeePlayer!</color>");
+
+                    // Force switch to Investigate (chase)
+                    ForceInterrupt(EnemyMode.InvestigateLastHeard);
+                    return true;
                 }
-                proximityTier1Reached = false;
-                proximityTier2Reached = false;
-                previousMinDistance = float.MaxValue;
             }
 
-            return r;
-        }
-        
-        /// <summary>
-        /// Tehdit skoru hesapla (Perceptron)
-        /// </summary>
-        private float ComputeThreatScore()
-        {
-            if (!perception || !threatPerceptron) return 0.5f;
-
-            Vector2 enemyPos = transform.position;
-            Vector2 playerPos = perception.player ? (Vector2)perception.player.position : perception.LastSeenPos;
-            
-            float distance = Vector2.Distance(enemyPos, playerPos);
-            bool los = perception.PlayerVisible;
-            float lightLevel = lightSensor ? lightSensor.GetLightLevel(enemyPos) : 0.5f;
-            float heatmap = HeatmapTracker.Instance ? HeatmapTracker.Instance.GetDensityAt(enemyPos) : 0.3f;
-            float timeSince = perception.TimeSinceContact;
-            bool recentHear = perception.HasRecentHear;
-            float visScore = los ? 1.0f : 0.0f;
-
-            return threatPerceptron.ComputeThreatScore(
-                distance, los, lightLevel, heatmap, timeSince, recentHear, visScore
-            );
-        }
-
-        /// <summary>
-        /// Hedef tehdit skoru hesapla (training için)
-        /// </summary>
-        private float CalculateTargetThreat()
-        {
-            if (!perception) return 0.5f;
-
-            float threat = 0f;
-
-            // Player görünüyorsa yüksek tehdit
-            if (perception.PlayerVisible)
-                threat += 0.5f;
-
-            // Player yakınsa tehdit artar
-            if (perception.player)
+            // ? PRIORITY 2: HearNoise (only if Patrol)
+            if (context.worldModel.HasHeardRecently)
             {
-                float dist = Vector2.Distance(transform.position, perception.player.position);
-                threat += Mathf.Clamp01(1f - (dist / 20f)) * 0.3f;
+                if (currentOption.CanBeInterruptedBy(InterruptType.HearNoise))
+                {
+                    if (showDebugLogs)
+                        Debug.Log("<color=yellow>[EnemyBrain] INTERRUPT: HearNoise!</color>");
+
+                    // Switch to Investigate
+                    ForceInterrupt(EnemyMode.InvestigateLastHeard);
+                    return true;
+                }
             }
 
-            // Taze ipucu varsa tehdit artar
-            if (perception.TimeSinceContact < 5f)
-                threat += 0.2f;
-
-            return Mathf.Clamp01(threat);
+            return false;
         }
 
         /// <summary>
-        /// Threat perceptron'u eğit
+        /// Force interrupt (override current option)
         /// </summary>
-        private void TrainThreatPerceptron(float targetThreat)
+        private void ForceInterrupt(EnemyMode forcedAction)
         {
-            if (!perception || !threatPerceptron) return;
-
-            Vector2 enemyPos = transform.position;
-            Vector2 playerPos = perception.player ? (Vector2)perception.player.position : perception.LastSeenPos;
-            
-            float distance = Vector2.Distance(enemyPos, playerPos);
-            bool los = perception.PlayerVisible;
-            float lightLevel = lightSensor ? lightSensor.GetLightLevel(enemyPos) : 0.5f;
-            float heatmap = HeatmapTracker.Instance ? HeatmapTracker.Instance.GetDensityAt(enemyPos) : 0.3f;
-            float timeSince = perception.TimeSinceContact;
-            bool recentHear = perception.HasRecentHear;
-            float visScore = los ? 1.0f : 0.0f;
-
-            threatPerceptron.Train(
-                distance, los, lightLevel, heatmap, timeSince, recentHear, visScore, targetThreat
-            );
-        }
-        
-        /// <summary>
-        /// Davranış Q-value'sini al
-        /// </summary>
-        private float GetBehaviorQValue(RLState state, BehaviorState behavior)
-        {
-            // Behavior'u RLAction'a map et
-            RLAction action = (RLAction)((int)behavior);
-            return qLearner.GetQValue(state, action);
-        }
-
-        /// <summary>
-        /// Davranış Q-value'sini güncelle
-        /// </summary>
-        private void UpdateBehaviorQ(RLState s, BehaviorState behavior, float reward, RLState s2)
-        {
-            RLAction action = (RLAction)((int)behavior);
-            qLearner.UpdateQ(s, action, reward, s2);
-        }
-
-        /// <summary>
-        /// Davranış kararını logla
-        /// </summary>
-        private void LogBehaviorDecision(RLState s, BehaviorState behavior, float reward, float qBefore, float qAfter, float tdError)
-        {
-            // ⚡ Console log - SADECE önemli olaylar (her 20 decision'da bir)
-            if (TotalDecisions % 20 == 0) // ⚡ 10 → 20 (daha az log)
+            // Stop current option (no Q-update - interrupted)
+            if (currentOption != null)
             {
-                Debug.Log($"<color=cyan>[EnemyBrain] 📊 #{TotalDecisions}: {behavior}, R={reward:F2}, Q={qBefore:F2}→{qAfter:F2}, ε={qLearner.CurrentEpsilon:F2}</color>");
+                // ✅ NEW: Credit assignment for interruption
+                HandleInterruptReward($"ForceInterrupt({forcedAction})");
+                currentOption.Stop(context);
             }
-            
-            // CSV logger (her decision)
-            RLAction action = (RLAction)((int)behavior);
-            logger?.LogDecision(s, action, reward, qBefore, qAfter, tdError);
+
+            // Get forced option
+            IEnemyOption forcedOption = GetOptionForAction(forcedAction);
+
+            if (forcedOption != null)
+            {
+                SwitchOption(forcedOption);
+
+                // Update tracking
+                lastAction = forcedAction;
+                optionStartTime = Time.time;
+            }
+        }
+
+        // Debug storage
+        private string _debugLastStateStr = "";
+        private string _debugLastQStr = "";
+
+        /// <summary>
+        /// Switch to new option
+        /// </summary>
+        private void SwitchOption(IEnemyOption newOption)
+        {
+            // Stop current
+            if (currentOption != null)
+            {
+                currentOption.Stop(context);
+            }
+
+            // Start new (Initialize instead of Start to avoid Unity conflict)
+            currentOption = newOption;
+            currentOption.Initialize(context);
+
+            if (showDebugLogs)
+            {
+                // Find target room / description
+                string targetDesc = "None";
+
+                if (newOption is PatrolOption patrol)
+                {
+                    targetDesc = "Route: " + patrol.GetRouteDescription();
+                }
+                else if (newOption is SweepOption sweep)
+                {
+                    targetDesc = "Sweep: " + sweep.GetTargetDescription();
+                }
+                else if (context.agentMover.Destination.HasValue)
+                {
+                    Vector2 dest = context.agentMover.Destination.Value;
+                    if (AITest.World.WorldRegistry.Instance)
+                    {
+                        var r = AITest.World.WorldRegistry.Instance.GetRoomAtPosition(dest);
+                        if (r != null) targetDesc = "Target: " + r.roomName;
+                        else targetDesc = "Hallway/Unknown";
+                    }
+                }
+
+                // Add perceptron details if available
+                var ts = GetComponent<AITest.Learning.TargetSelector>();
+                if (ts && !string.IsNullOrEmpty(ts.LastPerceptronLog) && (newOption is PatrolOption || newOption is SweepOption))
+                {
+                    targetDesc += $" | [Perceptron: {ts.LastPerceptronLog}]";
+                }
+
+                Debug.Log($"<color=cyan>[AI DECISION]</color> State: [{_debugLastStateStr}] -> Action: <b>{newOption.Mode}</b> (Q={qLearningPolicy.GetQValue(lastStateKey, (int)newOption.Mode):F2}) -> {targetDesc} | Qs: [{_debugLastQStr}]");
+            }
+        }
+
+        /// <summary>
+        /// Get option instance for action
+        /// </summary>
+        private IEnemyOption GetOptionForAction(EnemyMode action)
+        {
+            switch (action)
+            {
+                case EnemyMode.Patrol:
+                    return patrolOption;
+                case EnemyMode.InvestigateLastHeard:
+                    return investigateOption;
+                case EnemyMode.HeatSearchPeak:
+                    return heatSearchOption;
+                case EnemyMode.SweepArea:
+                    return sweepOption;
+                case EnemyMode.HideSpotCheck:
+                    return hideSpotCheckOption;
+                case EnemyMode.HeatSweep: // ✅ RoomTracker-based
+                    return heatSweepOption;
+                case EnemyMode.AmbushHotChoke: // ✅ RoomTracker-based
+                    return ambushHotChokeOption;
+                default:
+                    return patrolOption; // Fallback
+            }
+        }
+
+        /// <summary>
+        /// Heuristic action selection (fallback if learning disabled)
+        /// </summary>
+        private EnemyMode ChooseActionHeuristic(RLStateKey state)
+        {
+            // Simple heuristic rules
+
+            if (state.seePlayer == 1)
+                return EnemyMode.InvestigateLastHeard; // Chase!
+
+            if (state.hearRecently == 1)
+                return EnemyMode.InvestigateLastHeard;
+
+            if (state.heatConfidence >= 2) // High heat
+            {
+                // 50% chance between ambush and heat search when heat is high
+                if (Random.value < 0.5f)
+                    return EnemyMode.AmbushHotChoke;
+                else
+                    return EnemyMode.HeatSearchPeak;
+            }
+
+            if (state.nearHideSpots == 1)
+                return EnemyMode.HideSpotCheck;
+
+            if (state.timeSinceSeenBin == 0) // Just saw player
+                return EnemyMode.SweepArea;
+
+            // Default: Patrol
+            return EnemyMode.Patrol;
+        }
+
+        /// <summary>
+        /// End episode (decay epsilon, save Q-table)
+        /// </summary>
+        public void EndEpisode()
+        {
+            if (enableLearning)
+            {
+                qLearningPolicy.DecayEpsilon();
+            }
+
+            // Reset reward calculator
+            rewardCalculator.Reset();
+        }
+
+        /// <summary>
+        /// Context menu: Save Q-table
+        /// </summary>
+        [ContextMenu("Save Q-Table")]
+        public void SaveQTable()
+        {
+            string filename = useSimpleStateExtractor ? "qtable_simple" : "qtable";
+            qLearningPolicy.SaveQTable(filename);
+        }
+
+        /// <summary>
+        /// Context menu: Load Q-table
+        /// </summary>
+        [ContextMenu("Load Q-Table")]
+        public void LoadQTable()
+        {
+            string filename = useSimpleStateExtractor ? "qtable_simple" : "qtable";
+            qLearningPolicy.LoadQTable(filename);
+        }
+
+        /// <summary>
+        /// Context menu: Reset Q-table
+        /// </summary>
+        [ContextMenu("Reset Q-Table")]
+        public void ResetQTable()
+        {
+            qLearningPolicy.ResetQTable();
+        }
+
+        /// <summary>
+        /// Context menu: Print current state
+        /// </summary>
+        [ContextMenu("Print Current State")]
+        public void PrintCurrentState()
+        {
+            int stateKey;
+
+            if (useSimpleStateExtractor && simpleStateExtractor)
+            {
+                var simpleState = simpleStateExtractor.ExtractState();
+                stateKey = simpleState.GetHashKey();
+                Debug.Log($"<color=cyan>===== CURRENT STATE (SIMPLE) =====</color>");
+                Debug.Log($"State: {simpleState}");
+            }
+            else if (stateExtractor)
+            {
+                RLStateKey state = stateExtractor.ExtractState();
+                stateKey = state.ToPackedInt();
+                Debug.Log($"<color=cyan>===== CURRENT STATE (FULL) =====</color>");
+                Debug.Log($"State: {state}");
+            }
+            else
+            {
+                Debug.LogError("[EnemyBrain] No state extractor found!");
+                return;
+            }
+
+            float[] qValues = qLearningPolicy.GetQValues(stateKey);
+
+            Debug.Log($"State Key: {stateKey}");
+            Debug.Log($"Q-values:");
+
+            for (int i = 0; i < qValues.Length; i++)
+            {
+                EnemyMode mode = (EnemyMode)i;
+                Debug.Log($"  {mode}: {qValues[i]:F3}");
+            }
+
+            Debug.Log($"Stats: {qLearningPolicy.GetStatsSummary()}");
+        }
+
+        /// <summary>
+        /// ? PROMPT 14: Player captured event handler
+        /// </summary>
+        private void OnPlayerCaptured(float captureTime, Vector2 capturePos)
+        {
+            if (showDebugLogs)
+            {
+                Debug.Log($"<color=lime>[EnemyBrain] ??? PLAYER CAPTURED! ???</color>");
+                Debug.Log($"  Capture Time: {captureTime:F2}s");
+                Debug.Log($"  Position: {capturePos}");
+            }
+
+            // ? Big reward for capture
+            float bigReward = chaseExecutor ? chaseExecutor.captureReward : 50f;
+
+            // ? Apply reward to last Q-update
+            if (enableLearning && lastStateKey != 0)
+            {
+                int currentStateKey;
+
+                if (useSimpleStateExtractor && simpleStateExtractor)
+                {
+                    var simpleState = simpleStateExtractor.ExtractState();
+                    currentStateKey = simpleState.GetHashKey();
+                }
+                else if (stateExtractor)
+                {
+                    RLStateKey currentState = stateExtractor.ExtractState();
+                    currentStateKey = currentState.ToPackedInt();
+                }
+                else
+                {
+                    currentStateKey = 0;
+                }
+
+                // Immediate Q-update with capture reward
+                // ❌ REMOVED: Double counting fix! EpisodeManager handles this.
+                // qLearningPolicy.UpdateQ(lastStateKey, lastAction, bigReward, currentStateKey, captureTime);
+
+                if (showDebugLogs)
+                    Debug.Log($"<color=lime>[EnemyBrain] Capture Event received (Reward via EpisodeManager)</color>");
+            }
+
+            // ⚡ NOTE: EpisodeManager will handle episode end and reset
+        }
+
+        /// <summary>
+        /// ? Handle Reward/Q-Update for Interrupted Options (NEW)
+        /// Ensures data isn't lost when switching mid-option (e.g. noise heard)
+        /// </summary>
+        private void HandleInterruptReward(string interruptReason)
+        {
+             if (currentOption == null || !enableLearning) return;
+
+             float duration = Time.time - optionStartTime;
+             
+             // 1. Compute partial reward
+             // (Status is Running because it was interrupted)
+             float reward = rewardCalculator.ComputeReward(OptionStatus.Running, lastAction, duration, context);
+
+             // 2. Extract current state as "next state"
+             int nextStateKey = GetCurrentStateKey();
+
+             // 3. Update Q-table
+             qLearningPolicy.UpdateQ(lastStateKey, lastAction, reward, nextStateKey, duration);
+
+             if (showDebugLogs)
+             {
+                 Debug.Log($"<color=orange>[EnemyBrain] Option {lastAction} INTERRUPTED by {interruptReason}!</color>");
+                 Debug.Log($"  Partial Reward: {reward:F2} | Duration: {duration:F2}s");
+             }
+        }
+
+        private int GetCurrentStateKey()
+        {
+             if (useSimpleStateExtractor && simpleStateExtractor)
+             {
+                 var simpleState = simpleStateExtractor.ExtractState();
+                 return simpleState.GetHashKey();
+             }
+             else if (stateExtractor)
+             {
+                 RLStateKey state = stateExtractor.ExtractState();
+                 return state.ToPackedInt();
+             }
+             return 0;
         }
     }
 }

@@ -1,7 +1,7 @@
-ï»¿using UnityEngine;
+using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq; // âš¡ YENÄ°: LINQ for Where/OrderBy
+using System.Linq; // ? YENİ: LINQ for Where/OrderBy
 using AITest.Learning;
 using AITest.Sector;
 using AITest.Perception;
@@ -9,44 +9,44 @@ using AITest.Perception;
 namespace AITest.Enemy
 {
     /// <summary>
-    /// RL action'Ä± ? hedef/rota'ya Ã§evirir
+    /// RL action'ı ? hedef/rota'ya çevirir
     /// GoTo, Sweep, Ambush, Patrol
     /// </summary>
     public class ActionPlanner : MonoBehaviour
     {
         [Header("References")]
-        public EnemyController enemyController;
+        public AICharacterController AICharacterController;
         public Perception.Perception perception;
         public Sectorizer sectorizer;
         
         [Header("Sweep Settings")]
-        [Tooltip("Her sweep noktasÄ±nda durakla (saniye)")]
+        [Tooltip("Her sweep noktasında durakla (saniye)")]
         public float sweepPauseDuration = 0.75f;
         
         [Header("Ambush Settings")]
-        [Tooltip("Ambush bekleme sÃ¼resi (saniye)")]
+        [Tooltip("Ambush bekleme süresi (saniye)")]
         public float ambushWaitDuration = 6f;
         
         [Header("Action Lock")]
-        [Tooltip("Action flip-flop Ã¶nleme (saniye)")]
-        public float actionLockDuration = 1.0f; // ? 2.0 ? 1.0s (daha hÄ±zlÄ± karar deÄŸiÅŸimi!)
+        [Tooltip("Action flip-flop önleme (saniye)")]
+        public float actionLockDuration = 1.0f; // ? 2.0 ? 1.0s (daha hızlı karar değişimi!)
         
-        [Tooltip("Minimum execution sÃ¼resi (saniye)")]
+        [Tooltip("Minimum execution süresi (saniye)")]
         public float minExecutionTime = 1.0f; // ? 1.5 ? 1.0s
         
         [Header("Debug")]
-        public bool debugMode = true; // ? TRUE yap (action log'larÄ±nÄ± aÃ§!)
+        public bool debugMode = true; // ? TRUE yap (action log'larını aç!)
         
         [Header("Patrol Settings")]
-        [Tooltip("KaÃ§ sektÃ¶re patrol yapÄ±lacak")]
+        [Tooltip("Kaç sektöre patrol yapılacak")]
         [Range(2, 5)]
         public int patrolSectorCount = 3;
         
-        [Tooltip("Heatmap yoÄŸunluÄŸu eÅŸiÄŸi (bu deÄŸerin Ã¼stÃ¼ndeki sektÃ¶rler tercih edilir)")]
+        [Tooltip("Heatmap yoğunluğu eşiği (bu değerin üstündeki sektörler tercih edilir)")]
         [Range(0f, 1f)]
         public float heatmapThreshold = 0.2f;
         
-        [Tooltip("Exploration oranÄ± (random sektÃ¶r seÃ§me ÅŸansÄ± %)")]
+        [Tooltip("Exploration oranı (random sektör seçme şansı %)")]
         [Range(0f, 0.5f)]
         public float explorationRate = 0.2f; // %20 random sektor
 
@@ -59,54 +59,54 @@ namespace AITest.Enemy
         
         private void Awake()
         {
-            if (!enemyController) enemyController = GetComponent<EnemyController>();
+            if (!AICharacterController) AICharacterController = GetComponent<AICharacterController>();
             if (!perception) perception = GetComponent<Perception.Perception>();
             if (!sectorizer) sectorizer = Sectorizer.Instance;
         }
         
         /// <summary>
-        /// Action'Ä± execute et
+        /// Action'ı execute et
         /// </summary>
         public void Execute(RLAction action, string targetSectorId = null)
         {
-            // âš¡ FIX: Chase action iÃ§in Ã¶zel durum - Player gÃ¶rÃ¼nÃ¼yorsa action deÄŸiÅŸtirilebilir!
+            // ? FIX: Chase action için özel durum - Player görünüyorsa action değiştirilebilir!
             bool isUrgentChase = (action == RLAction.GoToLastSeen || action == RLAction.GoToLastHeard) 
                                  && perception && perception.PlayerVisible;
             
-            // âš¡ 1. Action Ã§alÄ±ÅŸÄ±yorsa YENÄ° action'Ä± REDDET! (EXCEPT urgent chase)
+            // ? 1. Action çalışıyorsa YENİ action'ı REDDET! (EXCEPT urgent chase)
             if (isExecuting && !isUrgentChase)
             {
                 if (debugMode)
-                    Debug.Log($"<color=red>[ActionPlanner] âŒ REJECTED: {action} (busy with {currentAction})</color>");
+                    Debug.Log($"<color=red>[ActionPlanner] ? REJECTED: {action} (busy with {currentAction})</color>");
                 return;
             }
             
-            // âš¡ 2. Urgent chase ise mevcut action'Ä± iptal et!
+            // ? 2. Urgent chase ise mevcut action'ı iptal et!
             if (isExecuting && isUrgentChase)
             {
                 if (debugMode)
-                    Debug.Log($"<color=orange>[ActionPlanner] âš ï¸ INTERRUPTING {currentAction} for URGENT CHASE!</color>");
+                    Debug.Log($"<color=orange>[ActionPlanner] ?? INTERRUPTING {currentAction} for URGENT CHASE!</color>");
                 
-                StopAllCoroutines(); // Mevcut action'Ä± kes!
+                StopAllCoroutines(); // Mevcut action'ı kes!
                 isExecuting = false;
             }
             
-            // âš¡ 3. AynÄ± action tekrar baÅŸlatma (cooldown) - EXCEPT urgent chase
+            // ? 3. Aynı action tekrar başlatma (cooldown) - EXCEPT urgent chase
             if (currentAction == action && Time.time - lastActionTime < actionLockDuration && !isUrgentChase)
             {
                 if (debugMode)
-                    Debug.Log($"<color=orange>[ActionPlanner] ğŸ”„ SAME ACTION cooldown: {action}</color>");
+                    Debug.Log($"<color=orange>[ActionPlanner] ?? SAME ACTION cooldown: {action}</color>");
                 return;
             }
             
             currentAction = action;
             lastActionTime = Time.time;
             
-            // âš¡ BURADA isExecuting = true set et!
+            // ? BURADA isExecuting = true set et!
             isExecuting = true;
             
             if (debugMode)
-                Debug.Log($"<color=cyan>[ActionPlanner] âœ… Executing action: {action} (sector={targetSectorId}){(isUrgentChase ? " [URGENT!]" : "")}</color>");
+                Debug.Log($"<color=cyan>[ActionPlanner] ? Executing action: {action} (sector={targetSectorId}){(isUrgentChase ? " [URGENT!]" : "")}</color>");
             
             switch (action)
             {
@@ -134,79 +134,79 @@ namespace AITest.Enemy
         
         private IEnumerator ExecuteGoTo(Vector2 target, string label)
         {
-            // âš¡ KONTROL: Target geÃ§erli mi?
+            // ? KONTROL: Target geçerli mi?
             if (target == Vector2.zero || float.IsNaN(target.x) || float.IsNaN(target.y))
             {
-                Debug.LogWarning($"<color=red>[ActionPlanner] âŒ Invalid target for {label}! Skipping...</color>");
+                Debug.LogWarning($"<color=red>[ActionPlanner] ? Invalid target for {label}! Skipping...</color>");
                 isExecuting = false;
                 yield break;
             }
             
-            // âš¡ REAL-TIME CHASE MODE: Player gÃ¶rÃ¼nÃ¼yorsa sÃ¼rekli pozisyonu gÃ¼ncelle!
+            // ? REAL-TIME CHASE MODE: Player görünüyorsa sürekli pozisyonu güncelle!
             bool isRealTimeChase = label == "LastSeen" && perception && perception.PlayerVisible;
             
             if (isRealTimeChase)
             {
-                Debug.Log($"<color=lime>[ActionPlanner] ğŸ¯ REAL-TIME CHASE MODE ACTIVATED!</color>");
+                Debug.Log($"<color=lime>[ActionPlanner] ?? REAL-TIME CHASE MODE ACTIVATED!</color>");
                 
-                // Player gÃ¶rÃ¼nÃ¼r olduÄŸu sÃ¼rece takip et!
+                // Player görünür olduğu sürece takip et!
                 float chaseStartTime = Time.time;
                 float maxChaseTime = 30f; // Timeout (30 saniye)
                 
                 while (perception.PlayerVisible && Time.time - chaseStartTime < maxChaseTime)
                 {
-                    // GÃ¼ncel player pozisyonunu al
+                    // Güncel player pozisyonunu al
                     Vector2 currentPlayerPos = perception.player.position;
                     
-                    // Her frame pozisyonu gÃ¼ncelle
-                    enemyController.GoTo(currentPlayerPos);
+                    // Her frame pozisyonu güncelle
+                    AICharacterController.GoTo(currentPlayerPos);
                     
-                    // Yakalama kontrolÃ¼ (1.5m iÃ§inde)
+                    // Yakalama kontrolü (1.5m içinde)
                     float distToPlayer = Vector2.Distance(transform.position, currentPlayerPos);
                     if (distToPlayer < 1.5f)
                     {
-                        Debug.Log($"<color=lime>[ActionPlanner] â˜… PLAYER CAUGHT! Distance: {distToPlayer:F2}m</color>");
+                        Debug.Log($"<color=lime>[ActionPlanner] ? PLAYER CAUGHT! Distance: {distToPlayer:F2}m</color>");
                         break;
                     }
                     
-                    // Her 0.1 saniyede pozisyon gÃ¼ncelle
+                    // Her 0.1 saniyede pozisyon güncelle
                     yield return new WaitForSeconds(0.1f);
                 }
                 
-                // Player kayboldu veya yakalandÄ±
+                // Player kayboldu veya yakalandı
                 if (perception.PlayerVisible)
                 {
-                    Debug.Log($"<color=lime>[ActionPlanner] âœ… Chase successful (caught or timeout)</color>");
+                    Debug.Log($"<color=lime>[ActionPlanner] ? Chase successful (caught or timeout)</color>");
                 }
                 else
                 {
-                    Debug.Log($"<color=yellow>[ActionPlanner] âš ï¸ Player lost from sight, going to last position...</color>");
-                    // Son gÃ¶rÃ¼len pozisyona git
+                    Debug.Log($"<color=yellow>[ActionPlanner] ?? Player lost from sight, going to last position...</color>");
+                    // Son görülen pozisyona git
                     target = perception.LastSeenPos;
-                    enemyController.GoTo(target);
+                    AICharacterController.GoTo(target);
                     
                     float timeout = 10f;
                     float startTime = Time.time;
-                    yield return new WaitUntil(() => enemyController.Arrived() || Time.time - startTime > timeout);
+                    yield return new WaitUntil(() => AICharacterController.Arrived() || Time.time - startTime > timeout);
                 }
                 
                 isExecuting = false;
                 yield break;
             }
             
-            // âš¡ NORMAL MODE (Player gÃ¶rÃ¼nmÃ¼yor, sadece LastSeen/LastHeard'e git)
+            // ? NORMAL MODE (Player görünmüyor, sadece LastSeen/LastHeard'e git)
             
-            // Portal Ã¼zerinden git (sektÃ¶r bilgisi varsa)
+            // Portal üzerinden git (sektör bilgisi varsa)
             var targetSector = sectorizer?.GetByPosition(target);
             if (targetSector != null && sectorizer != null)
             {
                 Vector2 portal = sectorizer.GetNearestPortal(targetSector, transform.position);
-                enemyController.GoTo(portal);
+                AICharacterController.GoTo(portal);
                 
-                // âš¡ Timeout ekle (10 saniye)
+                // ? Timeout ekle (10 saniye)
                 float timeout = 10f;
                 float startTime = Time.time;
-                yield return new WaitUntil(() => enemyController.Arrived() || Time.time - startTime > timeout);
+                yield return new WaitUntil(() => AICharacterController.Arrived() || Time.time - startTime > timeout);
                 
                 if (Time.time - startTime > timeout)
                 {
@@ -215,12 +215,12 @@ namespace AITest.Enemy
             }
             
             // Hedef pozisyona git
-            enemyController.GoTo(target);
+            AICharacterController.GoTo(target);
             
-            // âš¡ Timeout ekle (10 saniye)
+            // ? Timeout ekle (10 saniye)
             float timeout2 = 10f;
             float startTime2 = Time.time;
-            yield return new WaitUntil(() => enemyController.Arrived() || Time.time - startTime2 > timeout2);
+            yield return new WaitUntil(() => AICharacterController.Arrived() || Time.time - startTime2 > timeout2);
             
             if (Time.time - startTime2 > timeout2)
             {
@@ -228,7 +228,7 @@ namespace AITest.Enemy
             }
             
             if (debugMode)
-                Debug.Log($"<color=lime>[ActionPlanner] âœ… {label} reached!</color>");
+                Debug.Log($"<color=lime>[ActionPlanner] ? {label} reached!</color>");
             
             isExecuting = false;
         }
@@ -243,7 +243,7 @@ namespace AITest.Enemy
                 yield break;
             }
             
-            // Sweep route al (en yakÄ±ndan baÅŸlat)
+            // Sweep route al (en yakından başlat)
             Vector2[] sweepRoute = sectorizer.GetNearestSweepRoute(sector, transform.position);
             
             if (sweepRoute.Length == 0)
@@ -255,14 +255,14 @@ namespace AITest.Enemy
             
             Debug.Log($"<color=cyan>[ActionPlanner] Sweep: {sweepRoute.Length} points in sector {sectorId}</color>");
             
-            // Ã–nce portal'a git
+            // Önce portal'a git
             Vector2 portal = sectorizer.GetNearestPortal(sector, transform.position);
-            enemyController.GoTo(portal);
+            AICharacterController.GoTo(portal);
             
             // Timeout
             float timeout1 = 10f;
             float startTime1 = Time.time;
-            yield return new WaitUntil(() => enemyController.Arrived() || Time.time - startTime1 > timeout1);
+            yield return new WaitUntil(() => AICharacterController.Arrived() || Time.time - startTime1 > timeout1);
             
             if (Time.time - startTime1 > timeout1)
             {
@@ -271,30 +271,30 @@ namespace AITest.Enemy
                 yield break;
             }
             
-            // Her sweep noktasÄ±na git
+            // Her sweep noktasına git
             for (int i = 0; i < Mathf.Min(3, sweepRoute.Length); i++)
             {
                 Vector2 sweepPoint = sweepRoute[i];
-                // âŒ LOG KALDIRILDI - Her sweep point spam yapÄ±yordu
+                // ? LOG KALDIRILDI - Her sweep point spam yapıyordu
                 
-                enemyController.GoTo(sweepPoint);
+                AICharacterController.GoTo(sweepPoint);
                 
                 // Timeout
                 float timeout = 10f;
                 float startTime = Time.time;
-                yield return new WaitUntil(() => enemyController.Arrived() || Time.time - startTime > timeout);
+                yield return new WaitUntil(() => AICharacterController.Arrived() || Time.time - startTime > timeout);
                 
                 if (Time.time - startTime > timeout)
                 {
-                    // âŒ Timeout warning kaldÄ±rÄ±ldÄ± (normal bir durum)
+                    // ? Timeout warning kaldırıldı (normal bir durum)
                     continue;
                 }
                 
-                // âš¡ Sadece baÅŸarÄ±lÄ± sweep'lerde log
+                // ? Sadece başarılı sweep'lerde log
                 if (debugMode)
                     Debug.Log($"<color=lime>[ActionPlanner] Sweep {i+1}/3 OK</color>");
                 
-                // âš¡ HIDING SPOT LEARNING: Player gÃ¶rÃ¼nÃ¼yor mu?
+                // ? HIDING SPOT LEARNING: Player görünüyor mu?
                 bool playerFound = perception && perception.PlayerVisible;
                 
                 // Sweep route'taki index'i bul (original sweep points'te hangi index?)
@@ -305,13 +305,13 @@ namespace AITest.Enemy
                     if (playerFound)
                     {
                         sector.hidingStats[originalIndex].RecordPlayerFound();
-                        Debug.Log($"<color=red>[HidingLearning] âš ï¸ Player FOUND at {sectorId}-S{originalIndex}!</color>");
+                        Debug.Log($"<color=red>[HidingLearning] ?? Player FOUND at {sectorId}-S{originalIndex}!</color>");
                         break;  // Player bulundu, sweep bitir!
                     }
                     else
                     {
                         sector.hidingStats[originalIndex].RecordPlayerNotFound();
-                        // âŒ Not found log kaldÄ±rÄ±ldÄ± (spam)
+                        // ? Not found log kaldırıldı (spam)
                     }
                 }
                 
@@ -320,7 +320,7 @@ namespace AITest.Enemy
             }
             
             if (debugMode)
-                Debug.Log($"<color=lime>[ActionPlanner] âœ… Sweep completed!</color>");
+                Debug.Log($"<color=lime>[ActionPlanner] ? Sweep completed!</color>");
             
             isExecuting = false;
         }
@@ -353,17 +353,17 @@ namespace AITest.Enemy
                 yield break;
             }
             
-            // En yakÄ±n portal'a git
+            // En yakın portal'a git
             Vector2 portal = sectorizer.GetNearestPortal(sector, transform.position);
             
             Debug.Log($"<color=yellow>[ActionPlanner] Ambush: Going to portal {portal} in sector {sectorId}</color>");
             
-            enemyController.GoTo(portal);
+            AICharacterController.GoTo(portal);
             
             // ? TIMEOUT EKLE!
             float timeout = 10f;
             float startTime = Time.time;
-            yield return new WaitUntil(() => enemyController.Arrived() || Time.time - startTime > timeout);
+            yield return new WaitUntil(() => AICharacterController.Arrived() || Time.time - startTime > timeout);
             
             if (Time.time - startTime > timeout)
             {
@@ -379,7 +379,7 @@ namespace AITest.Enemy
             float waitStart = Time.time;
             while (Time.time - waitStart < ambushWaitDuration)
             {
-                // Player gÃ¶rÃ¼nÃ¼rse ambush baÅŸarÄ±lÄ± (EnemyBrain reward verecek)
+                // Player görünürse ambush başarılı (EnemyBrain reward verecek)
                 if (perception && perception.PlayerVisible)
                 {
                     if (debugMode)
@@ -398,7 +398,7 @@ namespace AITest.Enemy
         
         private IEnumerator ExecutePatrol()
         {
-            // ? KONTROL: Sectorizer var mÄ±?
+            // ? KONTROL: Sectorizer var mı?
             if (sectorizer == null)
             {
                 Debug.LogError("[ActionPlanner] Patrol: Sectorizer is NULL!");
@@ -406,7 +406,7 @@ namespace AITest.Enemy
                 yield break;
             }
             
-            // ? KONTROL: Yeterli sektÃ¶r var mÄ±?
+            // ? KONTROL: Yeterli sektör var mı?
             if (sectorizer.sectors == null || sectorizer.sectors.Length < patrolSectorCount)
             {
                 Debug.LogWarning($"[ActionPlanner] Patrol: Not enough sectors! ({sectorizer.sectors?.Length ?? 0}/{patrolSectorCount})");
@@ -414,7 +414,7 @@ namespace AITest.Enemy
                 yield break;
             }
             
-            // ? DÄ°NAMÄ°K ROTA: HeatmapTracker'dan en sÄ±k ziyaret edilen sektÃ¶rleri al
+            // ? DİNAMİK ROTA: HeatmapTracker'dan en sık ziyaret edilen sektörleri al
             string[] patrolRoute = GetDynamicPatrolRoute();
             
             if (patrolRoute == null || patrolRoute.Length == 0)
@@ -424,7 +424,7 @@ namespace AITest.Enemy
                 yield break;
             }
             
-            Debug.Log($"<color=cyan>[ActionPlanner] ğŸ¯ Dynamic patrol route (heatmap-based): {string.Join(" â†’ ", patrolRoute)}</color>");
+            Debug.Log($"<color=cyan>[ActionPlanner] ?? Dynamic patrol route (heatmap-based): {string.Join(" › ", patrolRoute)}</color>");
             
             foreach (var sectorId in patrolRoute)
             {
@@ -432,39 +432,39 @@ namespace AITest.Enemy
                 
                 if (sector == null)
                 {
-                    // âŒ Warning kaldÄ±rÄ±ldÄ± (spam)
+                    // ? Warning kaldırıldı (spam)
                     continue;
                 }
                 
                 Vector2 anchor = sectorizer.GetNearestAnchor(sector, transform.position);
                 
-                // âŒ Her sektÃ¶r log'u kaldÄ±rÄ±ldÄ±
+                // ? Her sektör log'u kaldırıldı
                 
-                enemyController.GoTo(anchor);
+                AICharacterController.GoTo(anchor);
                 
-                // âš¡ TIMEOUT EKLE!
+                // ? TIMEOUT EKLE!
                 float timeout = 15f;
                 float startTime = Time.time;
-                yield return new WaitUntil(() => enemyController.Arrived() || Time.time - startTime > timeout);
+                yield return new WaitUntil(() => AICharacterController.Arrived() || Time.time - startTime > timeout);
                 
                 if (Time.time - startTime > timeout)
                 {
-                    // âŒ Timeout warning kaldÄ±rÄ±ldÄ±
+                    // ? Timeout warning kaldırıldı
                     // Timeout olsa bile devam et
                 }
                 
-                // KÄ±sa bekleme
+                // Kısa bekleme
                 yield return new WaitForSeconds(0.5f);
             }
             
             if (debugMode)
-                Debug.Log($"<color=lime>[ActionPlanner] âœ… Patrol completed!</color>");
+                Debug.Log($"<color=lime>[ActionPlanner] ? Patrol completed!</color>");
             
             isExecuting = false;
         }
         
         /// <summary>
-        /// âš¡ YENÄ°: HeatmapTracker'dan en sÄ±k ziyaret edilen sektÃ¶rleri al
+        /// ? YENİ: HeatmapTracker'dan en sık ziyaret edilen sektörleri al
         /// WITH EXPLORATION
         /// </summary>
         private string[] GetDynamicPatrolRoute()
@@ -475,39 +475,39 @@ namespace AITest.Enemy
                 return new string[] { "A", "C", "E" };
             }
             
-            // âš¡ EXPLORATION: Random sektÃ¶r seÃ§me ÅŸansÄ±
+            // ? EXPLORATION: Random sektör seçme şansı
             if (Random.value < explorationRate)
             {
                 return GetRandomPatrolRoute();
             }
             
-            // TÃ¼m sektÃ¶rlerin heatmap yoÄŸunluÄŸunu hesapla
+            // Tüm sektörlerin heatmap yoğunluğunu hesapla
             System.Collections.Generic.List<(string id, float density)> sectorDensities = new();
             
             foreach (var sector in sectorizer.sectors)
             {
                 if (sector == null || string.IsNullOrEmpty(sector.id)) continue;
                 
-                // SektÃ¶r merkezindeki heatmap yoÄŸunluÄŸunu al
+                // Sektör merkezindeki heatmap yoğunluğunu al
                 Vector2 center = sector.bounds.center;
                 float density = AITest.Core.HeatmapTracker.Instance.GetDensityAt(center);
                 
                 sectorDensities.Add((sector.id, density));
                 
-                // âŒ DEBUG LOG KALDIRILDI - Her sektÃ¶rÃ¼ yazdÄ±rÄ±yordu!
+                // ? DEBUG LOG KALDIRILDI - Her sektörü yazdırıyordu!
             }
             
-            // YoÄŸunluÄŸa gÃ¶re sÄ±rala (azalan)
+            // Yoğunluğa göre sırala (azalan)
             sectorDensities.Sort((a, b) => b.density.CompareTo(a.density));
             
-            // Ä°lk N sektÃ¶rÃ¼ seÃ§ (en sÄ±k ziyaret edilenler)
+            // İlk N sektörü seç (en sık ziyaret edilenler)
             var topSectors = new System.Collections.Generic.List<string>();
             int count = 0;
             
             foreach (var (id, density) in sectorDensities)
             {
-                // Minimum threshold kontrolÃ¼ (Ã§ok az ziyaret edilmiÅŸ sektÃ¶rleri atla)
-                if (density >= heatmapThreshold || count < 2) // En az 2 sektÃ¶r seÃ§
+                // Minimum threshold kontrolü (çok az ziyaret edilmiş sektörleri atla)
+                if (density >= heatmapThreshold || count < 2) // En az 2 sektör seç
                 {
                     topSectors.Add(id);
                     count++;
@@ -516,13 +516,13 @@ namespace AITest.Enemy
                 }
             }
             
-            // EÄŸer hiÃ§ yoÄŸunluk yoksa (oyun baÅŸÄ±), static route kullan
+            // Eğer hiç yoğunluk yoksa (oyun başı), static route kullan
             if (topSectors.Count == 0)
             {
                 return new string[] { "A", "C", "E" };
             }
             
-            // âš¡ BONUS: %30 ÅŸans ile 1 random sektÃ¶r ekle (exploration)
+            // ? BONUS: %30 şans ile 1 random sektör ekle (exploration)
             if (topSectors.Count < sectorizer.sectors.Length && Random.value < 0.3f)
             {
                 var unvisitedSectors = sectorizer.sectors
@@ -537,7 +537,7 @@ namespace AITest.Enemy
                 }
             }
             
-            // Enemy'nin mevcut konumuna gÃ¶re en yakÄ±ndan baÅŸlayacak ÅŸekilde sÄ±rala
+            // Enemy'nin mevcut konumuna göre en yakından başlayacak şekilde sırala
             topSectors.Sort((a, b) =>
             {
                 var sectorA = sectorizer.GetById(a);
@@ -555,7 +555,7 @@ namespace AITest.Enemy
         }
         
         /// <summary>
-        /// âš¡ YENÄ°: Tamamen random patrol route
+        /// ? YENİ: Tamamen random patrol route
         /// </summary>
         private string[] GetRandomPatrolRoute()
         {

@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using UnityEngine.Tilemaps;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -17,22 +18,22 @@ namespace AITest.Pathfinding
         [Tooltip("Hedefe varış yarıçapı")]
         [Range(0.1f, 2f)] public float arriveRadius = 0.6f;
         
-        [Tooltip("Duvar layer mask")]
+        [Tooltip("Statik duvar layer mask - SADECE Wall layer'ını seçin, Obstacles DEĞİL!")]
         public LayerMask wallMask;
         
         [Header("Wall Clearance")]
         [Tooltip("Duvarlardan minimum uzaklık (metre) - Path duvarlardan bu kadar uzak kalır")]
-        [Range(0f, 2f)] public float wallClearance = 0.5f; // ⚡ 0.3f → 0.5f (daha uzak!)
+        [Range(0f, 2f)] public float wallClearance = 0.3f;
         
         [Tooltip("Duvar buffer çarpanı - Duvara bitişik hücreleri bloke etmek için")]
-        [Range(1f, 3f)] public float wallBufferMultiplier = 1.5f; // ⚡ YENİ!
+        [Range(1f, 3f)] public float wallBufferMultiplier = 1.2f;
         
         [Header("Grid Bounds")]
         [Tooltip("Grid sınırları (dünya koordinatları)")]
         public Rect gridBounds = new Rect(-15, -10, 30, 20);
         
         [Header("Debug")]
-        public bool drawPath = true;
+        public bool drawPath = false;
         public bool drawGrid = false;
         
         // Grid data
@@ -151,6 +152,8 @@ namespace AITest.Pathfinding
         /// </summary>
         private void BuildGrid()
         {
+            Debug.Log($"<color=magenta>[Pathfinder] 🔧 BuildGrid STARTED! GameObject: {gameObject.name}</color>");
+            
             gridOrigin = gridBounds.min;
             gridWidth = Mathf.CeilToInt(gridBounds.width / cellSize);
             gridHeight = Mathf.CeilToInt(gridBounds.height / cellSize);
@@ -160,20 +163,33 @@ namespace AITest.Pathfinding
             
             int blockedCount = 0;
             
+            Debug.Log($"<color=magenta>[Pathfinder] Wall Mask Value: {wallMask.value}</color>");
+            
             if (wallMask.value == 0)
             {
                 Debug.LogError("<color=red>[Pathfinder] ⚠️ Wall Mask is EMPTY!</color>");
                 return;
             }
             
+            // ⚡ Debug: wallMask içinde hangi layer'lar var?
+            string maskLayers = "";
+            for (int i = 0; i < 32; i++)
+            {
+                if ((wallMask.value & (1 << i)) != 0)
+                {
+                    maskLayers += LayerMask.LayerToName(i) + " (" + i + "), ";
+                }
+            }
+            
             // ⚡ PHASE 1: BoxCollider2D ile DOĞRU duvar tespiti
             Debug.Log($"<color=yellow>[Pathfinder] === STARTING GRID BUILD === </color>");
             Debug.Log($"<color=yellow>[Pathfinder] Wall Mask Value: {wallMask.value}</color>");
+            Debug.Log($"<color=yellow>[Pathfinder] Wall Mask Layers: {maskLayers}</color>");
             Debug.Log($"<color=yellow>[Pathfinder] Grid Size: {gridWidth}x{gridHeight}</color>");
             Debug.Log($"<color=yellow>[Pathfinder] Cell Size: {cellSize}</color>");
-            Debug.Log($"<color=yellow>[Pathfinder] Wall Clearance: {wallClearance}</color>");
             
             // ⚡ FIX: Missing for loops
+            int debugBlockedSampleCount = 0;
             for (int y = 0; y < gridHeight; y++)
             {
                 for (int x = 0; x < gridWidth; x++)
@@ -182,11 +198,20 @@ namespace AITest.Pathfinding
                     
                     // ⚡ FİX: 5-nokta kontrolü (merkez + 4 köşe) - Daha agresif tespit
                     bool isBlocked = false;
+                    Collider2D hitCollider = null;
                     
                     // 1. Merkez kontrol
-                    if (Physics2D.OverlapPoint(worldPos, wallMask))
+                    hitCollider = Physics2D.OverlapPoint(worldPos, wallMask);
+                    if (hitCollider)
                     {
                         isBlocked = true;
+                        
+                        // Debug: İlk birkaç bloke edilen hücreyi logla
+                        if (debugBlockedSampleCount < 5)
+                        {
+                            Debug.Log($"<color=orange>[Pathfinder] Cell ({x},{y}) at {worldPos} BLOCKED by: {hitCollider.gameObject.name} (Layer: {LayerMask.LayerToName(hitCollider.gameObject.layer)})</color>");
+                            debugBlockedSampleCount++;
+                        }
                     }
                     else
                     {
@@ -202,9 +227,17 @@ namespace AITest.Pathfinding
                         
                         foreach (var point in checkPoints)
                         {
-                            if (Physics2D.OverlapPoint(point, wallMask))
+                            hitCollider = Physics2D.OverlapPoint(point, wallMask);
+                            if (hitCollider)
                             {
                                 isBlocked = true;
+                                
+                                // Debug: İlk birkaç bloke edilen hücreyi logla
+                                if (debugBlockedSampleCount < 5)
+                                {
+                                    Debug.Log($"<color=orange>[Pathfinder] Cell ({x},{y}) corner at {point} BLOCKED by: {hitCollider.gameObject.name} (Layer: {LayerMask.LayerToName(hitCollider.gameObject.layer)})</color>");
+                                    debugBlockedSampleCount++;
+                                }
                                 break;
                             }
                         }
@@ -237,9 +270,11 @@ namespace AITest.Pathfinding
                 return;
             }
             
-            // ⚡ PHASE 2: Clearance map hesapla + duvara bitişik hücreleri bloke et!
+            // Clearance map hesapla + wall buffer uygula
             CalculateClearanceMap();
             ApplyWallBuffer();
+            
+            Debug.Log("<color=lime>[Pathfinder] ✅ Grid build complete - Ready for pathfinding!</color>");
         }
         
         /// <summary>
@@ -287,12 +322,12 @@ namespace AITest.Pathfinding
         }
         
         /// <summary>
-        /// ⚡ YENİ: Duvara çok yakın hücreleri tamamen bloke et
+        /// Duvara çok yakın hücreleri tamamen bloke et
         /// </summary>
         private void ApplyWallBuffer()
         {
             int bufferedCount = 0;
-            float bufferDistance = cellSize * 1.2f; // ⚡ FIX: Cell size'a göre dinamik buffer
+            float bufferDistance = cellSize * wallBufferMultiplier;
             
             Debug.Log($"<color=yellow>[Pathfinder] Applying wall buffer with distance: {bufferDistance:F2}m</color>");
             
@@ -321,19 +356,33 @@ namespace AITest.Pathfinding
         {
             if (walkable == null)
             {
-                Debug.LogWarning("[Pathfinder] Grid not ready yet!");
-                return;
+                Debug.LogWarning("[Pathfinder] Grid not ready yet! Force building now...");
+                BuildGrid();
+                
+                // If still failed, abort
+                if (walkable == null) return;
             }
             
             if (currentTarget.HasValue && Vector2.Distance(currentTarget.Value, worldTarget) < 0.1f)
                 return;
             
             currentTarget = worldTarget;
+            currentPath = null;
+            pathIndex = 0;
             
             Vector2Int start = WorldToGrid(transform.position);
             Vector2Int goal = WorldToGrid(worldTarget);
             
             currentPath = FindPath(start, goal);
+        }
+
+        /// <summary>
+        /// ⚡ FIXED: Clear path manually (call on Episode reset)
+        /// </summary>
+        public void ClearPath()
+        {
+            currentPath = null;
+            currentTarget = null;
             pathIndex = 0;
         }
         
@@ -387,18 +436,21 @@ namespace AITest.Pathfinding
                     if (closedSet.Contains(neighbor))
                         continue;
                     
-                    // ⚡ FIX: Clearance penalty - cell size'a göre dinamik
+                    // Clearance penalty
                     float clearancePenalty = 0f;
-                    float effectiveClearance = cellSize * 1.5f; // Cell size'ın 1.5 katı kadar mesafe
+                    float effectiveClearance = cellSize * 2f;
                     
                     if (clearanceMap[neighbor.x, neighbor.y] < effectiveClearance)
                     {
-                        // Duvara ne kadar yakınsa o kadar ceza
                         float normalizedDist = clearanceMap[neighbor.x, neighbor.y] / effectiveClearance;
-                        clearancePenalty = (1f - normalizedDist) * 15f; // Ağır ceza
+                        clearancePenalty = (1f - normalizedDist) * 10f;
                     }
                     
-                    float tentativeG = gScore[current] + 1 + clearancePenalty;
+                    // Determine movement cost (1 for straight, 1.414 for diagonal)
+                    float movementCost = (Mathf.Abs(neighbor.x - current.x) == 1 && Mathf.Abs(neighbor.y - current.y) == 1) 
+                        ? 1.414f : 1f;
+                    
+                    float tentativeG = gScore[current] + movementCost + clearancePenalty;
                     
                     if (!gScore.ContainsKey(neighbor) || tentativeG < gScore[neighbor])
                     {
@@ -460,19 +512,25 @@ namespace AITest.Pathfinding
         
         private float Heuristic(Vector2Int a, Vector2Int b)
         {
-            return Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+            // Euclidean is better for 8-way movement than Manhattan
+            return Mathf.Sqrt(Mathf.Pow(a.x - b.x, 2) + Mathf.Pow(a.y - b.y, 2));
         }
         
         private List<Vector2Int> GetNeighbors(Vector2Int pos)
         {
             var neighbors = new List<Vector2Int>();
             
+            // 8-directional movement
             Vector2Int[] dirs = new Vector2Int[]
             {
-                new Vector2Int(1, 0),
-                new Vector2Int(-1, 0),
-                new Vector2Int(0, 1),
-                new Vector2Int(0, -1)
+                new Vector2Int(1, 0),   // Right
+                new Vector2Int(-1, 0),  // Left
+                new Vector2Int(0, 1),   // Up
+                new Vector2Int(0, -1),  // Down
+                new Vector2Int(1, 1),   // Up-Right
+                new Vector2Int(-1, 1),  // Up-Left
+                new Vector2Int(1, -1),  // Down-Right
+                new Vector2Int(-1, -1)  // Down-Left
             };
             
             foreach (var dir in dirs)
@@ -480,6 +538,13 @@ namespace AITest.Pathfinding
                 Vector2Int neighbor = pos + dir;
                 if (InBounds(neighbor) && walkable[neighbor.x, neighbor.y])
                 {
+                    // Diagonal check: Don't cut corners if adjacent cells are blocked
+                    if (Mathf.Abs(dir.x) == 1 && Mathf.Abs(dir.y) == 1)
+                    {
+                        if (!walkable[pos.x + dir.x, pos.y] || !walkable[pos.x, pos.y + dir.y])
+                            continue;
+                    }
+
                     neighbors.Add(neighbor);
                 }
             }
@@ -576,37 +641,62 @@ namespace AITest.Pathfinding
         #region Gizmos
         private void OnDrawGizmos()
         {
-            // Grid çiz
-            if (drawGrid && walkable != null)
+            // Grid bounds'u her zaman çiz (Edit mode'da da görünür)
+            if (drawGrid)
             {
-                for (int y = 0; y < gridHeight; y++)
+                // Grid sınırlarını göster
+                Gizmos.color = Color.yellow;
+                Gizmos.DrawWireCube(gridBounds.center, new Vector3(gridBounds.width, gridBounds.height, 0));
+                
+                // Grid'i çiz (eğer oluşturulduysa)
+                if (walkable != null)
                 {
-                    for (int x = 0; x < gridWidth; x++)
+                    for (int y = 0; y < gridHeight; y++)
                     {
-                        // Clearance gösterimi
-                        if (walkable[x, y])
+                        for (int x = 0; x < gridWidth; x++)
                         {
-                            float clearance = clearanceMap[x, y];
-                            if (clearance < wallClearance)
+                            // Clearance gösterimi
+                            if (walkable[x, y])
                             {
-                                // Duvara yakın - sarı/turuncu
-                                float t = clearance / wallClearance;
-                                Gizmos.color = new Color(1f, t, 0f, 0.3f);
+                                float clearance = clearanceMap[x, y];
+                                if (clearance < wallClearance)
+                                {
+                                    // Duvara yakın - sarı/turuncu
+                                    float t = clearance / wallClearance;
+                                    Gizmos.color = new Color(1f, t, 0f, 0.3f);
+                                }
+                                else
+                                {
+                                    // Güvenli - yeşil
+                                    Gizmos.color = new Color(0, 1, 0, 0.1f);
+                                }
                             }
                             else
                             {
-                                // Güvenli - yeşil
-                                Gizmos.color = new Color(0, 1, 0, 0.1f);
+                                // Duvar - kırmızı
+                                Gizmos.color = new Color(1, 0, 0, 0.5f);
                             }
+                            
+                            Vector2 worldPos = GridToWorld(x, y);
+                            Gizmos.DrawCube(worldPos, Vector3.one * cellSize * 0.9f);
                         }
-                        else
+                    }
+                }
+                else
+                {
+                    // Grid henüz oluşturulmadıysa, sadece grid hücrelerini çiz
+                    int tempGridWidth = Mathf.CeilToInt(gridBounds.width / cellSize);
+                    int tempGridHeight = Mathf.CeilToInt(gridBounds.height / cellSize);
+                    Vector2 tempGridOrigin = gridBounds.min;
+                    
+                    Gizmos.color = new Color(0.5f, 0.5f, 0.5f, 0.15f);
+                    for (int y = 0; y < tempGridHeight; y++)
+                    {
+                        for (int x = 0; x < tempGridWidth; x++)
                         {
-                            // Duvar - kırmızı
-                            Gizmos.color = new Color(1, 0, 0, 0.5f);
+                            Vector2 worldPos = tempGridOrigin + new Vector2((x + 0.5f) * cellSize, (y + 0.5f) * cellSize);
+                            Gizmos.DrawWireCube(worldPos, Vector3.one * cellSize * 0.9f);
                         }
-                        
-                        Vector2 worldPos = GridToWorld(x, y);
-                        Gizmos.DrawCube(worldPos, Vector3.one * cellSize * 0.9f);
                     }
                 }
             }

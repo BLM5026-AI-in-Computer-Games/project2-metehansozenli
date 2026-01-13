@@ -5,18 +5,18 @@ using AITest.Sector;
 namespace AITest.Perception
 {
     /// <summary>
-    /// Görüþ (raycast fan) + Ses (noise event) algý sistemi
+    /// Gï¿½rï¿½ï¿½ (raycast fan) + Ses (noise event) algï¿½ sistemi
     /// </summary>
     public class Perception : MonoBehaviour
     {
         [Header("Vision")]
-        [Tooltip("Görüþ menzili (metre)")]
+        [Tooltip("Gï¿½rï¿½ï¿½ menzili (metre)")]
         [Range(1f, 20f)] public float viewDistance = 10f;
         
-        [Tooltip("Görüþ açýsý (derece)")]
+        [Tooltip("Gï¿½rï¿½ï¿½ aï¿½ï¿½sï¿½ (derece)")]
         [Range(30f, 180f)] public float viewAngle = 90f;
         
-        [Tooltip("Raycast sayýsý")]
+        [Tooltip("Raycast sayï¿½sï¿½")]
         [Range(3, 15)] public int rayCount = 7;
         
         [Tooltip("Duvar layer mask")]
@@ -24,13 +24,13 @@ namespace AITest.Perception
         
         [Header("Audio")]
         [Tooltip("Ses duyma menzili (metre)")]
-        [Range(1f, 30f)] public float hearingRange = 25f; // 15 ? 25 (daha geniþ range!)
+        [Range(1f, 30f)] public float hearingRange = 25f; // 15 ? 25 (daha geniï¿½ range!)
         
-        [Tooltip("Ses event ne kadar süre güncel sayýlýr (saniye)")]
+        [Tooltip("Ses event ne kadar sï¿½re gï¿½ncel sayï¿½lï¿½r (saniye)")]
         [Range(1f, 10f)] public float soundMemoryTime = 20f;
         
-        [Tooltip("Görme hafýzasý süresi (saniye) - Bu süre sonra LastSeen sýfýrlanýr")]
-        [Range(5f, 30f)] public float visionMemoryTime = 20f; // ? YENÝ!
+        [Tooltip("Gï¿½rme hafï¿½zasï¿½ sï¿½resi (saniye) - Bu sï¿½re sonra LastSeen sï¿½fï¿½rlanï¿½r")]
+        [Range(5f, 30f)] public float visionMemoryTime = 20f; // ? YENï¿½!
         
         [Header("References")]
         public Transform player;
@@ -63,7 +63,7 @@ namespace AITest.Perception
         
         private void OnEnable()
         {
-            // ? NoiseBus hazýr deðilse bekle!
+            // ? NoiseBus hazï¿½r deï¿½ilse bekle!
             if (NoiseBus.Instance == null)
             {
                 Debug.LogWarning("[Perception] NoiseBus not ready yet, delaying subscription...");
@@ -76,7 +76,7 @@ namespace AITest.Perception
         }
         
         /// <summary>
-        /// NoiseBus hazýr olana kadar bekle
+        /// NoiseBus hazï¿½r olana kadar bekle
         /// </summary>
         private System.Collections.IEnumerator WaitForNoiseBus()
         {
@@ -95,7 +95,7 @@ namespace AITest.Perception
             if (NoiseBus.Instance != null)
             {
                 NoiseBus.Instance.OnNoise -= OnNoiseReceived;
-                // Debug log kaldýr
+                // Debug log kaldï¿½r
                 // Debug.Log($"<color=yellow>[Perception] Unsubscribed from NoiseBus</color>");
             }
         }
@@ -107,7 +107,7 @@ namespace AITest.Perception
         }
         
         /// <summary>
-        /// Görüþ kontrolü (raycast fan)
+        /// Gï¿½rï¿½ï¿½ kontrolï¿½ (raycast fan)
         /// </summary>
         private void UpdateVision()
         {
@@ -122,25 +122,25 @@ namespace AITest.Perception
             Vector2 toPlayer = playerPos - origin;
             float distToPlayer = toPlayer.magnitude;
             
-            // 1. Mesafe kontrolü
+            // 1. Mesafe kontrolï¿½
             if (distToPlayer > viewDistance)
             {
                 PlayerVisible = false;
                 return;
             }
             
-            // ? 2. Forward direction: Player ÖNCEKÝ framede görüldüyse ona bak, deðilse hareket yönü
+            // ? 2. Forward direction: Player ï¿½NCEKï¿½ framede gï¿½rï¿½ldï¿½yse ona bak, deï¿½ilse hareket yï¿½nï¿½
             Vector2 forward;
-            if (PlayerVisible) // Önceki framede görüldü mü?
+            if (PlayerVisible) // ï¿½nceki framede gï¿½rï¿½ldï¿½ mï¿½?
             {
-                forward = toPlayer.normalized; // Player yönüne kitle
+                forward = toPlayer.normalized; // Player yï¿½nï¿½ne kitle
             }
             else
             {
-                forward = GetMovementDirection(); // Hareket yönü
+                forward = GetMovementDirection(); // Hareket yï¿½nï¿½
             }
             
-            // 3. Açý kontrolü
+            // 3. Aï¿½ï¿½ kontrolï¿½
             float angleToPlayer = Vector2.Angle(forward, toPlayer.normalized);
             
             if (angleToPlayer > viewAngle * 0.5f)
@@ -149,29 +149,41 @@ namespace AITest.Perception
                 return;
             }
             
-            // ? 4. DUVAR KONTROLÜ (RAYCAST) - Kritik!
-            // Enemy ile Player arasýnda duvar var mý kontrol et
+            // ? 4. DUVAR KONTROLï¿½ (RAYCAST) - Kritik!
+            // Enemy ile Player arasï¿½nda duvar var mï¿½ kontrol et
             RaycastHit2D hit = Physics2D.Raycast(origin, toPlayer.normalized, distToPlayer, obstructionMask);
             
             if (hit.collider != null)
             {
-                // Hit aldýk - player mý yoksa duvar mý?
+                // Hit aldï¿½k - player mï¿½ yoksa duvar mï¿½?
                 bool hitIsPlayer = hit.transform == player || hit.transform.IsChildOf(player);
                 
                 if (!hitIsPlayer)
                 {
-                    // Duvar engeli! Player görülmüyor
+                    // Duvar engeli! Player gï¿½rï¿½lmï¿½yor
                     PlayerVisible = false;
                     return;
                 }
             }
             
-            // ? Tüm kontroller geçti - Player görünüyor!
+            // ? 5. HIDING POINT CHECK - Player saklanï¿½yorsa gï¿½rï¿½nmesin!
+            if (AITest.World.WorldRegistry.Instance != null)
+            {
+                bool isHiding = AITest.World.WorldRegistry.Instance.IsPlayerHiding(playerPos);
+                if (isHiding)
+                {
+                    // Player hiding point'te saklanï¿½yor ve dï¿½ï¿½man kontrol etmemiï¿½!
+                    PlayerVisible = false;
+                    return;
+                }
+            }
+            
+            // ? Tï¿½m kontroller geï¿½ti - Player gï¿½rï¿½nï¿½yor!
             PlayerVisible = true;
             LastSeenPos = playerPos;
             lastSeenTime = Time.time;
             
-            // Sektör ID güncelle
+            // Sektor ID gÃ¼ncelle
             if (Sectorizer.Instance != null)
             {
                 LastSeenSectorId = Sectorizer.Instance.GetIdByPosition(playerPos);
@@ -179,7 +191,7 @@ namespace AITest.Perception
         }
         
         /// <summary>
-        /// Hareket yönünü al (velocity veya transform.up)
+        /// Hareket yï¿½nï¿½nï¿½ al (velocity veya transform.up)
         /// </summary>
         private Vector2 GetMovementDirection()
         {
@@ -188,7 +200,7 @@ namespace AITest.Perception
             {
                 return rb.linearVelocity.normalized;
             }
-            return transform.up; // Fallback
+            return transform.right; // Fallback (Aligned with AICharacterController X-axis rotation)
         }
         
         /// <summary>
@@ -199,10 +211,10 @@ namespace AITest.Perception
             Vector2 origin = transform.position;
             float dist = Vector2.Distance(origin, position);
             
-            // Debug log kaldýr (spam önle)
+            // Debug log kaldï¿½r (spam ï¿½nle)
             // Debug.Log($"<color=magenta>[Perception] ?? OnNoiseReceived! Type={(isGlobal ? "GLOBAL" : "LOCAL")} Pos={position} Dist={dist:F1} Sector={sectorId}</color>");
             
-            // Global noise: Range kontrolü YOK!
+            // Global noise: Range kontrolï¿½ YOK!
             if (isGlobal)
             {
                 LastHeardPos = position;
@@ -213,7 +225,7 @@ namespace AITest.Perception
                 return;
             }
             
-            // Local noise: Range kontrolü VAR!
+            // Local noise: Range kontrolï¿½ VAR!
             if (dist <= hearingRange && dist <= radius)
             {
                 LastHeardPos = position;
@@ -222,14 +234,14 @@ namespace AITest.Perception
                 
                 Debug.Log($"<color=yellow>[Perception] ? LOCAL noise @ {sectorId} (dist={dist:F1})</color>");
             }
-            // Baþarýsýz duyma log'u kaldýr (spam!)
+            // Baï¿½arï¿½sï¿½z duyma log'u kaldï¿½r (spam!)
             // else {
             //     Debug.Log($"<color=red>[Perception] ? LOCAL noise too far!</color>");
             // }
         }
         
         /// <summary>
-        /// Son temas zamanýný güncelle
+        /// Son temas zamanï¿½nï¿½ gï¿½ncelle
         /// </summary>
         private void UpdateTimeSinceContact()
         {
@@ -238,10 +250,10 @@ namespace AITest.Perception
             
             TimeSinceContact = Mathf.Min(timeSinceSeen, timeSinceHeard);
             
-            // Ses hafýzasý
+            // Ses hafï¿½zasï¿½
             HasRecentHear = timeSinceHeard < soundMemoryTime;
             
-            // ? HAFIZA TIMEOUT: 10 saniye sonra LastSeen sýfýrla!
+            // ? HAFIZA TIMEOUT: 10 saniye sonra LastSeen sï¿½fï¿½rla!
             if (timeSinceSeen > visionMemoryTime && LastSeenSectorId != "None")
             {
                 LastSeenSectorId = "None";
@@ -249,7 +261,7 @@ namespace AITest.Perception
                 Debug.Log($"<color=orange>[Perception] ?? Vision memory expired! LastSeen reset.</color>");
             }
             
-            // ? Ses hafýzasý da timeout
+            // ? Ses hafï¿½zasï¿½ da timeout
             if (timeSinceHeard > soundMemoryTime && LastHeardSectorId != "None")
             {
                 LastHeardSectorId = "None";
@@ -265,7 +277,7 @@ namespace AITest.Perception
             
             Vector2 origin = transform.position;
             
-            // ? Forward direction: Player görünüyorsa ona, deðilse hareket yönü
+            // ? Forward direction: Player gï¿½rï¿½nï¿½yorsa ona, deï¿½ilse hareket yï¿½nï¿½
             Vector2 forward;
             if (PlayerVisible && player != null)
             {
@@ -276,11 +288,11 @@ namespace AITest.Perception
                 forward = GetMovementDirection();
             }
             
-            // Görüþ menzili çemberi
+            // Gï¿½rï¿½ï¿½ menzili ï¿½emberi
             Gizmos.color = new Color(1f, 1f, 0f, 0.1f);
             Gizmos.DrawWireSphere(origin, viewDistance);
             
-            // ? Görüþ konisi (raycast fan) - Duvar engelleri ile sýnýrlý!
+            // ? Gï¿½rï¿½ï¿½ konisi (raycast fan) - Duvar engelleri ile sï¿½nï¿½rlï¿½!
             float halfAngle = viewAngle * 0.5f;
             float baseAngle = Mathf.Atan2(forward.y, forward.x) * Mathf.Rad2Deg - halfAngle;
             float stepAngle = viewAngle / Mathf.Max(1, rayCount - 1);
@@ -293,32 +305,32 @@ namespace AITest.Perception
                     Mathf.Sin(angle * Mathf.Deg2Rad)
                 );
                 
-                // ? RAYCAST (duvar kontrolü) - DUVARDA DUR!
+                // ? RAYCAST (duvar kontrolï¿½) - DUVARDA DUR!
                 RaycastHit2D hit = Physics2D.Raycast(origin, dir, viewDistance, obstructionMask);
                 
-                // ? Ray uzunluðu: Hit varsa hit.distance, yoksa viewDistance
+                // ? Ray uzunluï¿½u: Hit varsa hit.distance, yoksa viewDistance
                 float rayDist = hit.collider ? hit.distance : viewDistance;
                 
-                // ? Renk: Duvar varsa KIRMIZI (engelli), yoksa SARI (açýk)
+                // ? Renk: Duvar varsa KIRMIZI (engelli), yoksa SARI (aï¿½ï¿½k)
                 if (hit.collider)
                 {
-                    // Duvar engeli - kýrmýzý ray (KÜRÇÝZGÝSÝ)
+                    // Duvar engeli - kï¿½rmï¿½zï¿½ ray (Kï¿½Rï¿½ï¿½ZGï¿½Sï¿½)
                     Gizmos.color = new Color(1f, 0.2f, 0.2f, 0.6f);
                     Gizmos.DrawRay(origin, dir * rayDist); // Sadece duvara kadar!
                     
-                    // Hit point göster (duvar)
+                    // Hit point gï¿½ster (duvar)
                     Gizmos.color = new Color(1f, 0f, 0f, 0.8f);
                     Gizmos.DrawWireSphere(hit.point, 0.15f);
                 }
                 else
                 {
-                    // Engel yok - sarý ray (tam uzunluk)
+                    // Engel yok - sarï¿½ ray (tam uzunluk)
                     Gizmos.color = new Color(1f, 1f, 0f, 0.4f);
                     Gizmos.DrawRay(origin, dir * rayDist);
                 }
             }
             
-            // ? Player'a özel raycast (yeþil = görünüyor, kýrmýzý = duvar engeli)
+            // ? Player'a ï¿½zel raycast (yeï¿½il = gï¿½rï¿½nï¿½yor, kï¿½rmï¿½zï¿½ = duvar engeli)
             if (player)
             {
                 Vector2 toPlayer = (Vector2)player.position - origin;
@@ -326,21 +338,21 @@ namespace AITest.Perception
                 
                 if (distToPlayer <= viewDistance)
                 {
-                    // ? Raycast at (duvar kontrolü)
+                    // ? Raycast at (duvar kontrolï¿½)
                     RaycastHit2D hit = Physics2D.Raycast(origin, toPlayer.normalized, distToPlayer, obstructionMask);
                     
                     // Hit analizi
                     bool wallBlocking = false;
                     if (hit.collider != null)
                     {
-                        // Hit aldýk - player mý duvar mý?
+                        // Hit aldï¿½k - player mï¿½ duvar mï¿½?
                         bool hitIsPlayer = hit.transform == player || hit.transform.IsChildOf(player);
                         wallBlocking = !hitIsPlayer;
                     }
                     
                     if (wallBlocking)
                     {
-                        // ?? Duvar engeli var - KIRMIZI çizgi sadece duvara kadar!
+                        // ?? Duvar engeli var - KIRMIZI ï¿½izgi sadece duvara kadar!
                         Gizmos.color = new Color(1f, 0f, 0f, 0.9f);
                         Gizmos.DrawLine(origin, hit.point);
                         
@@ -348,61 +360,82 @@ namespace AITest.Perception
                         Gizmos.color = new Color(1f, 0f, 0f, 1f);
                         Gizmos.DrawWireSphere(hit.point, 0.3f);
                         
-                        // Player marker (görünmüyor - gri)
+                        // Player marker (gï¿½rï¿½nmï¿½yor - gri)
                         Gizmos.color = new Color(0.5f, 0.5f, 0.5f, 0.5f);
                         Gizmos.DrawWireSphere(player.position, 0.4f);
                     }
                     else if (PlayerVisible)
                     {
-                        // ? Player görünüyor - YEÞÝL çizgi
+                        // ? Player gï¿½rï¿½nï¿½yor - YEï¿½ï¿½L ï¿½izgi
                         Gizmos.color = new Color(0f, 1f, 0f, 0.9f);
                         Gizmos.DrawLine(origin, player.position);
                         
-                        // Player marker (görünüyor - yeþil)
+                        // Player marker (gï¿½rï¿½nï¿½yor - yeï¿½il)
                         Gizmos.color = new Color(0f, 1f, 0f, 1f);
                         Gizmos.DrawWireSphere(player.position, 0.5f);
                     }
                     else
                     {
-                        // ?? Açý dýþýnda - TURUNCU noktalý çizgi
+                        // ?? Aï¿½ï¿½ dï¿½ï¿½ï¿½nda - TURUNCU noktalï¿½ ï¿½izgi
                         Gizmos.color = new Color(1f, 0.5f, 0f, 0.5f);
                         
-                        // Noktalý çizgi efekti (her 0.5m'de bir segment)
+                        // Noktalï¿½ ï¿½izgi efekti (her 0.5m'de bir segment)
                         float segmentLength = 0.5f;
                         int segments = Mathf.CeilToInt(distToPlayer / segmentLength);
                         
-                        for (int i = 0; i < segments; i += 2) // Her 2 segmentte 1 çiz
+                        for (int i = 0; i < segments; i += 2) // Her 2 segmentte 1 ï¿½iz
                         {
                             Vector2 start = origin + toPlayer.normalized * (i * segmentLength);
                             Vector2 end = origin + toPlayer.normalized * Mathf.Min((i + 1) * segmentLength, distToPlayer);
                             Gizmos.DrawLine(start, end);
                         }
                         
-                        // Player marker (açý dýþý - turuncu)
+                        // Player marker (aï¿½ï¿½ dï¿½ï¿½ï¿½ - turuncu)
                         Gizmos.color = new Color(1f, 0.5f, 0f, 0.6f);
                         Gizmos.DrawWireSphere(player.position, 0.4f);
                     }
                 }
             }
             
-            // Son görülen pozisyon (kýrmýzý)
+            // Son gï¿½rï¿½len pozisyon (kï¿½rmï¿½zï¿½)
             if (Time.time - lastSeenTime < 5f)
             {
                 Gizmos.color = Color.red;
                 Gizmos.DrawWireSphere(LastSeenPos, 0.5f);
             }
             
-            // Son duyulan pozisyon (sarý)
+            // Son duyulan pozisyon (sarï¿½)
             if (HasRecentHear)
             {
                 Gizmos.color = Color.yellow;
                 Gizmos.DrawWireSphere(LastHeardPos, 0.7f);
             }
             
-            // ? Forward direction ok (kýrmýzý - player görünüyorsa, mavi - hareket yönü)
+            // ? Forward direction ok (kï¿½rmï¿½zï¿½ - player gï¿½rï¿½nï¿½yorsa, mavi - hareket yï¿½nï¿½)
             Gizmos.color = PlayerVisible ? new Color(0f, 1f, 0f, 0.8f) : new Color(0f, 0.5f, 1f, 0.6f);
             Gizmos.DrawRay(origin, forward * viewDistance * 0.5f);
         }
+        #endregion
+        
+        #region Public API
+        
+        /// <summary>
+        /// Reset perception memory (called at episode start/end)
+        /// </summary>
+        public void ResetMemory()
+        {
+            LastSeenPos = Vector2.zero;
+            LastSeenSectorId = "None";
+            lastSeenTime = -999f;
+            
+            LastHeardPos = Vector2.zero;
+            LastHeardSectorId = "None";
+            lastHeardTime = -999f;
+            
+            HasRecentHear = false;
+            PlayerVisible = false;
+        }
+        
         #endregion
     }
 }
