@@ -7974,8 +7974,8 @@ MonoBehaviour:
     m_Center: {x: 0, y: 0, z: 0}
     m_Extent: {x: 10, y: 10, z: 0}
   minSpawnDistance: 5
-  maxEpisodes: 100
-  trainingTimeScale: 2.3
+  maxEpisodes: 600
+  trainingTimeScale: 14.5
   captureReward: 10
   escapeReward: -5
   timestepReward: -0.1
@@ -7988,6 +7988,8 @@ MonoBehaviour:
   episodeSteps: 0
   showDebugLogs: 1
   showGizmos: 1
+  useRandomSeed: 0
+  randomSeed: 42
 --- !u!1 &624281691
 GameObject:
   m_ObjectHideFlags: 0
@@ -14002,7 +14004,6 @@ GameObject:
   - component: {fileID: 1404950146}
   - component: {fileID: 1404950145}
   - component: {fileID: 1404950144}
-  - component: {fileID: 1404950143}
   - component: {fileID: 1404950162}
   - component: {fileID: 1404950161}
   - component: {fileID: 1404950142}
@@ -14107,15 +14108,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::AITest.Learning.SimpleStateExtractor
   worldModel: {fileID: 1404950150}
   enemyTransform: {fileID: 1404950132}
-  playerTransform: {fileID: 1941928430}
-  distCloseThreshold: 8
-  distFarThreshold: 16
-  timeRecentThreshold: 2
-  timeOldThreshold: 6
-  sameSectorRadius: 5
+  roomTracker: {fileID: 1404950160}
+  heatGraph: {fileID: 1573093092}
+  recentContactThreshold: 5
   heatWarmThreshold: 5
   heatHotThreshold: 20
+  panicPhaseThreshold: 0.6
   showDebugLogs: 0
+  useRealPlayerPosition: 0
 --- !u!114 &1404950137
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14159,8 +14159,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d25939888f68bab41a808bd29d7384e6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AITest.Learning.ActionMasker
-  enableMasking: 1
-  patrolAlwaysValid: 1
   showDebugLogs: 0
 --- !u!114 &1404950139
 MonoBehaviour:
@@ -14180,7 +14178,7 @@ MonoBehaviour:
   qLearningPolicy:
     alpha: 0.3
     gamma: 0.95
-    epsilon: 0.3
+    epsilon: 0.5
     epsilonDecay: 0.995
     epsilonMin: 0.05
     statesVisited: 0
@@ -14191,7 +14189,7 @@ MonoBehaviour:
   actionMasker: {fileID: 1404950147}
   patrolOption: {fileID: 1404950144}
   investigateOption: {fileID: 1404950145}
-  heatSearchOption: {fileID: 1404950143}
+  heatSearchOption: {fileID: 0}
   sweepOption: {fileID: 1404950146}
   hideSpotCheckOption: {fileID: 1404950142}
   heatSweepOption: {fileID: 1404950162}
@@ -14219,7 +14217,7 @@ MonoBehaviour:
   perception: {fileID: 1404950151}
   pathfinder: {fileID: 1404950155}
   mover: {fileID: 1404950165}
-  agentMover: {fileID: 0}
+  agentMover: {fileID: 1404950166}
   perceptron: {fileID: 1404950163}
   enemyTransform: {fileID: 1404950132}
   showDebugLogs: 0
@@ -14264,23 +14262,6 @@ MonoBehaviour:
   spotsToCheck: 3
   checkDuration: 1.5
   enableLearning: 0
---- !u!114 &1404950143
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1404950131}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3cfa75a6531bc0741bb47a4a1bce1e60, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::AITest.Enemy.HeatSearchOption
-  maxDuration: 15
-  minCommitTime: 2
-  showDebugLogs: 0
-  scanDuration: 2
-  heatShiftThreshold: 1.5
 --- !u!114 &1404950144
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14346,8 +14327,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d25939888f68bab41a808bd29d7384e6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AITest.Learning.ActionMasker
-  enableMasking: 1
-  patrolAlwaysValid: 1
   showDebugLogs: 0
 --- !u!114 &1404950148
 MonoBehaviour:
@@ -14436,7 +14415,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 256
   hearingRange: 25
-  soundMemoryTime: 10
+  soundMemoryTime: 30
   visionMemoryTime: 20
   player: {fileID: 1941928430}
   drawGizmos: 1
@@ -15610,12 +15589,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b088654c6bbe11340b4b30fe93a179e1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AITest.Heat.TransitionHeatGraph
-  decayRate: 0.1
+  decayRate: 0.016
   minHeatThreshold: 0.01
   maxHeatCap: 100
-  walkWeight: 1
-  sprintWeightMultiplier: 2
-  interactionNodeBoost: 0.5
+  walkWeight: 5
+  sprintWeightMultiplier: 3
+  interactionNodeBoost: 5
   chokePercentile: 0.75
   enableCellHeatOverlay: 0
   showDebugLogs: 0
