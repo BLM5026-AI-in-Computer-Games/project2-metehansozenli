@@ -36,6 +36,7 @@ namespace AITest.Enemy
         public bool HasPath => pathfinder && pathfinder.HasPath;
         public bool IsMoving => controller && controller.IsMoving;
         public Vector2? Destination => currentDestination;
+        public Vector2 Velocity => controller ? controller.Velocity : Vector2.zero;
 
         private void Awake()
         {

@@ -191,6 +191,14 @@ namespace AITest.Quest
         {
             return $"{CompletedCount}/{TotalCount} ({Progress01:P0})";
         }
+
+        /// <summary>
+        /// Get progress heuristic (0.0 to 1.0) for strategic phase analysis
+        /// </summary>
+        public float GetProgress()
+        {
+            return Progress01;
+        }
     }
 
     [System.Serializable]

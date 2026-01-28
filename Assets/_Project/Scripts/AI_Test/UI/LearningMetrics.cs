@@ -46,7 +46,7 @@ namespace AITest.UI
         
         [Header("Enhanced Tracking (Professor Feedback)")]
         [Tooltip("Track last N episodes for rolling average")]
-        public int rollingWindowSize = 100;
+        public int rollingWindowSize = 25;
         
         [Tooltip("CSV export path (relative to project)")]
         public string csvExportPath = "TrainingData/learning_metrics.csv";

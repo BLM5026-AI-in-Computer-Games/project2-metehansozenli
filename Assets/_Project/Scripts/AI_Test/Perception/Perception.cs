@@ -24,13 +24,13 @@ namespace AITest.Perception
         
         [Header("Audio")]
         [Tooltip("Ses duyma menzili (metre)")]
-        [Range(1f, 30f)] public float hearingRange = 25f; // 15 ? 25 (daha geni� range!)
+        [Range(1f, 30f)] public float hearingRange = 25f; // 15 ? 25 (daha geni range!)
         
-        [Tooltip("Ses event ne kadar s�re g�ncel say�l�r (saniye)")]
-        [Range(1f, 10f)] public float soundMemoryTime = 20f;
+        [Tooltip("Ses event ne kadar sre gncel saylr (saniye)")]
+        [Range(1f, 30f)] public float soundMemoryTime = 30f;
         
-        [Tooltip("G�rme haf�zas� s�resi (saniye) - Bu s�re sonra LastSeen s�f�rlan�r")]
-        [Range(5f, 30f)] public float visionMemoryTime = 20f; // ? YEN�!
+        [Tooltip("Grme hafzas sresi (saniye) - Bu sre sonra LastSeen sfrlanr")]
+        [Range(5f, 30f)] public float visionMemoryTime = 20f; // ? YEN!
         
         [Header("References")]
         public Transform player;

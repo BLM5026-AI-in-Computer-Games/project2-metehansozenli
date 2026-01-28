@@ -488,6 +488,10 @@ public class PlayerTrainingBotController : MonoBehaviour
         bool done = currentQuest.TickInteraction(transform, dt);
         if (done || currentQuest.IsCompleted)
         {
+            // ? NEW: Quest Complete NOISE! (Loud mechanical sound)
+            EmitNoiseSafe(1.0f); // Max loudness = 25m radius
+            if (debugLogs) Debug.Log("<color=yellow>[Bot] Quest Completed! LOUD NOISE EMITTED!</color>");
+
             knowsQuestLocation = false; // Reset for next quest
             Transition(BotState.AcquireQuestTarget);
         }
@@ -605,11 +609,10 @@ public class PlayerTrainingBotController : MonoBehaviour
 
     private void TickHiding()
     {
-        // 1. Check if we were discovered (HideSpotCheckOption found us)
-        if (currentHide == null || !currentHide.IsPlayerHiding) // IsPlayerHiding is true if occupied
+        // 1. Check occupancy
+        if (currentHide == null || !currentHide.IsPlayerHiding)
         {
-            // We were forced out or spot logic failed
-            ApplyLocomotion(LocomotionMode.Sprint); // Panic run!
+            ApplyLocomotion(LocomotionMode.Sprint);
             Transition(BotState.Escape);
             return;
         }
@@ -617,30 +620,47 @@ public class PlayerTrainingBotController : MonoBehaviour
         // 2. Wait for hide timer
         bool timeUp = Time.time >= hideUntil;
         
-        // 3. Assess safety to exit
+        // ? NEW: Enforce Minimum Stay Duration (2.0s) to prevent flickering
+        // Even if threat drops instantly, stay a bit to be sure.
+        bool minStaySatisfied = Time.time >= (hideUntil - (hideMaxSeconds - 3.0f)); 
+        // Logic: hideUntil is (Now + Rand(10, 25)). So we force at least ~3-5s stay relative to start.
+        // Better: track entry time.
+        // Let's use stateTime.
+        if (stateTime < 4.0f) // Minimum 4 seconds strict lock
+        {
+             // EMERGENCY EXIT ONLY: If enemy is literally opening the locker (Distance < 1.5m)
+             if (threat.enemy != null && Vector2.Distance(transform.position, threat.enemy.position) < 1.5f)
+             {
+                 // Panic exit
+             }
+             else
+             {
+                 return; // STAY HIDDEN
+             }
+        }
+
+        // 3. Assess safety
         bool enemyFar = true;
         if (threat.enemy != null)
         {
             float dist = Vector2.Distance(transform.position, threat.enemy.position);
-            if (dist < 6.0f) enemyFar = false; // Don't exit if enemy is within 6m
+            if (dist < 8.0f) enemyFar = false; // Increased safety margin from 6.0 to 8.0
         }
 
         // Exit conditions:
-        // - Time is up AND enemy is far enough (Safe exit)
-        // - Threat dropped to Low (Safe exit)
-        // - We've been hiding waay too long (Force exit to avoid stuck)
+        // - Time is up AND enemy is far (Clean exit)
+        // - Threat is LOW AND we stayed long enough (Early safe exit)
+        // - Forced exit (timeout)
         
-        bool safeToExit = (timeUp && enemyFar) || (threat.CurrentThreat == BotThreatModel.ThreatLevel.Low);
-        bool forceExit = Time.time >= hideUntil + 10f; // 10s grace period
+        bool safeToExit = (timeUp && enemyFar) || (threat.CurrentThreat == BotThreatModel.ThreatLevel.Low && enemyFar);
+        bool forceExit = Time.time >= hideUntil + 15f; 
 
         if (safeToExit || forceExit)
         {
             if (currentHide != null)
-                currentHide.Exit(gameObject); // This makes us visible again
+                currentHide.Exit(gameObject);
 
             currentHide = null;
-            
-            // Resume mission
             Transition(BotState.Recover);
         }
     }
@@ -654,59 +674,116 @@ public class PlayerTrainingBotController : MonoBehaviour
             return;
         }
 
-        // ? DYNAMIC ESCAPE
-        // If we have no defined safe points, or current one is null
+        if (threat.enemy != null && Vector2.Distance(transform.position, threat.enemy.position) < 3.5f)
+        {
+            ForceSprintBurst();
+        }
+
+        // Path validation (existing)
+        if (mover != null && mover.IsMoving && threat.enemy != null)
+        {
+            float distToEnemy = Vector2.Distance(transform.position, threat.enemy.position);
+            Vector2 nextPos = (Vector2)transform.position + mover.Velocity * 0.5f; 
+            float futureDist = Vector2.Distance(nextPos, threat.enemy.position);
+
+            if (futureDist < distToEnemy - 0.2f)
+            {
+                mover.Stop();
+                currentSafe = null;
+            }
+        }
+
         if (currentSafe == null)
         {
              if (safePoints != null && safePoints.Count > 0)
              {
-                 currentSafe = PickFarthestSafePointFromEnemy();
+                 // ? IMPROVED SELECTION: Filter out points where path goes through enemy
+                 currentSafe = PickBestSafePointWithSafetyCheck();
+                 
                  if (currentSafe != null)
                  {
                      mover?.SetDestination(currentSafe.transform.position);
                      MaybeSprintForTravel(currentSafe.transform.position, preferQuiet: false);
                  }
              }
-             else if (threat.enemy != null)
+             
+             // Fallback
+             if (currentSafe == null && threat.enemy != null)
              {
-                 // Smart Panic: Run to farthest ROOM
-                 bool foundRoom = false;
+                 // Panic Run Logic (same as before but maybe smarter?)
+                 // ... existing logic ...
                  if (AITest.World.WorldRegistry.Instance)
                  {
+                     // ... existing room logic ...
                      var rooms = AITest.World.WorldRegistry.Instance.GetAllRooms();
-                     if (rooms != null && rooms.Count > 0)
-                     {
-                         var farthest = rooms[0];
-                         float maxDist = -1f;
-                         foreach(var r in rooms) {
-                             if(!r) continue;
-                             float d = Vector2.Distance(r.Center, threat.enemy.position);
-                             if (d > maxDist) { maxDist = d; farthest = r; }
-                         }
-                         if (farthest != null) {
-                             mover?.SetDestination(farthest.Center);
-                             ForceSprintBurst();
-                             foundRoom = true;
-                         }
+                     AITest.World.RoomZone bestRoom = null;
+                     float maxScore = -1f;
+
+                     foreach(var r in rooms) {
+                         if(!r) continue;
+                         float d = Vector2.Distance(r.Center, threat.enemy.position);
+                         // Penalize rooms that require crossing the enemy
+                         float angle = Vector2.Angle(r.Center - (Vector2)transform.position, (Vector2)threat.enemy.position - (Vector2)transform.position);
+                         if (angle < 45f) d -= 100f; // Strongly penalize instructions towards enemy
+
+                         float score = d + Random.Range(0f, 5f);
+                         if (score > maxScore) { maxScore = score; bestRoom = r; }
+                     }
+
+                     if (bestRoom != null) {
+                         mover?.SetDestination(bestRoom.Center);
+                         ForceSprintBurst();
                      }
                  }
-
-                 if (!foundRoom)
+                 else
                  {
                      Vector2 dir = ((Vector2)transform.position - (Vector2)threat.enemy.position).normalized;
-                     Vector2 panicDest = (Vector2)transform.position + dir * 5f;
+                     Vector2 panicDest = (Vector2)transform.position + dir * 6f;
                      mover?.SetDestination(panicDest);
                      ForceSprintBurst();
                  }
              }
         }
 
-        // If we reached our safe point (or panic point), pick a new one
         if (mover != null && mover.ReachedDestination)
         {
-            // Reset currentSafe so we pick a new one (or new panic vector) next tick
             currentSafe = null;
         }
+    }
+
+    // ? NEW HELPER
+    private SafePoint PickBestSafePointWithSafetyCheck()
+    {
+        if (threat.enemy == null) return PickFarthestSafePointFromEnemy();
+
+        SafePoint best = null;
+        float bestScore = -9999f;
+        
+        foreach (var sp in safePoints)
+        {
+            if (sp == null) continue;
+            
+            float distToMe = Vector2.Distance(transform.position, sp.transform.position);
+            float distToEnemy = Vector2.Distance(sp.transform.position, threat.enemy.position);
+            
+            // Safety check: Don't pick point if direction is towards enemy
+            Vector2 dirToPoint = (sp.transform.position - transform.position).normalized;
+            Vector2 dirToEnemy = (threat.enemy.position - transform.position).normalized;
+            float dot = Vector2.Dot(dirToPoint, dirToEnemy);
+            
+            if (dot > 0.5f) continue; // Skip if point is generally in direction of enemy (within 60 degrees)
+
+            // Score: Further from enemy is better, Closer to me is better (less travel)
+            float score = distToEnemy * 2.0f - distToMe;
+            
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = sp;
+            }
+        }
+        
+        return best;
     }
 
     private void TickRecover()
@@ -843,9 +920,27 @@ public class PlayerTrainingBotController : MonoBehaviour
 
     private void EmitNoiseSafe(float loudness)
     {
-        if (EmitNoise == null) return;
         loudness = Mathf.Clamp01(loudness);
-        EmitNoise((Vector2)transform.position, loudness);
+        
+        // 1. Invoke local hook (if any external system is listening)
+        if (EmitNoise != null)
+            EmitNoise((Vector2)transform.position, loudness);
+
+        // 2. ? FIX: Directly publish to Global Noise Bus so Enemy can hear!
+        if (AITest.Core.NoiseBus.Instance != null)
+        {
+            // Convert loudness (0..1) to radius (e.g. 1.0 = 25m)
+            float radius = loudness * 25.0f; 
+            
+            // Note: NoiseBus usually handles Sector calculation internally or accepts it
+            // Assuming method name is 'EmitNoise' or 'PublishNoise'. 
+            // Based on common patterns in this project, let's try 'EmitNoise'.
+            // If compilation fails, we might need to check the exact name.
+            // Looking at Perception.cs, it subscribes to OnNoise.
+            // Let's use Reflection or assume 'EmitNoise' for now based on context.
+            // Method is named 'Emit', signature: Emit(Vector2 pos, float radius, string sectorId, bool isGlobal)
+            AITest.Core.NoiseBus.Instance.Emit((Vector2)transform.position, radius, "", false);
+        }
     }
 
     // -------------------------
@@ -857,7 +952,10 @@ public class PlayerTrainingBotController : MonoBehaviour
         spot = null;
         float bestScore = float.NegativeInfinity;
         Vector2 p = transform.position;
-        Vector2 enemyPos = threat.enemy ? (Vector2)threat.enemy.position : p;
+        
+        // If enemy is null, treat enemy pos as far away
+        Vector2 enemyPos = threat.enemy ? (Vector2)threat.enemy.position : (p + Vector2.right * 100f);
+        bool hasEnemy = threat.enemy != null;
 
         foreach (var hs in hideSpots)
         {
@@ -865,17 +963,45 @@ public class PlayerTrainingBotController : MonoBehaviour
             if (hs.IsOccupied) continue;
 
             float distToSpot = Vector2.Distance(p, hs.transform.position);
+            
+            // Too far (don't run across map)
+            if (distToSpot > 25.0f) continue;
+
             float distFromEnemy = Vector2.Distance(enemyPos, hs.transform.position);
             
-            // Spot çok uzaksa atla (20m max - increased from 6m)
-            if (distToSpot > 20.0f) continue;
+            // SAFETY CHECK 1: Don't pick spot if it is CLOSER to enemy than to us (unless we are very close to it)
+            if (hasEnemy && distFromEnemy < distToSpot && distToSpot > 3.0f) continue;
             
-            // SCORE: Düşmandan uzak + bize yakın = iyi
-            // distFromEnemy yüksek = iyi (+)
-            // distToSpot düşük = iyi (-)
-            // Weight update: Prioritize safety (distFromEnemy) slightly more
-            float score = (distFromEnemy * 1.2f) - (distToSpot * 0.8f);
+            // SAFETY CHECK 2: Don't run INTO the enemy
+            if (hasEnemy)
+            {
+                // Vector from me to spot
+                Vector2 toSpot = (hs.transform.position - transform.position).normalized;
+                // Vector from me to enemy
+                Vector2 toEnemy = (threat.enemy.position - transform.position).normalized;
+                
+                float dot = Vector2.Dot(toSpot, toEnemy);
+                
+                // If angle is small (running towards enemy), penalize heavily or reject
+                if (dot > 0.6f && distToSpot > 2.0f) continue; // Running towards enemy -> REJECT
+            }
+
+            // SCORE
+            // Base: Further from enemy is better, Closer to me is better
+            float score = (distFromEnemy * 1.5f) - (distToSpot * 1.0f);
             
+            // PRIORITY: Local room spots get MASSIVE boost
+            if (distToSpot < 5.0f) score += 20.0f; // Strongly prefer local
+            
+            // VISIBILITY BONUS: If spot is behind a wall relative to enemy, boost it
+            if (hasEnemy)
+            {
+                 // Simple raycast check from Enemy to Spot
+                 // If hit wall, it's safer
+                 var hit = Physics2D.Linecast(enemyPos, hs.transform.position, LayerMask.GetMask("Obstacles"));
+                 if (hit.collider != null) score += 10.0f;
+            }
+
             if (score > bestScore)
             {
                 bestScore = score;

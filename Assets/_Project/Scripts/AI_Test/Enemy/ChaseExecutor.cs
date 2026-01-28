@@ -64,7 +64,7 @@ namespace AITest.Enemy
             // Auto-find components
             if (!context) context = GetComponent<EnemyContext>();
             if (!mover) mover = GetComponent<AIAgentMover>();
-            if (!metrics) metrics = FindObjectOfType<LearningMetrics>();
+            if (!metrics) metrics = FindFirstObjectByType<LearningMetrics>();
         }
 
         /// <summary>

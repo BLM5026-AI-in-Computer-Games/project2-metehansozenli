@@ -93,9 +93,9 @@ namespace AITest.UI
         private void Awake()
         {
             // Auto-find components
-            metricsCollector = FindObjectOfType<AITest.Metrics.MetricsCollector>();
-            episodeManager = FindObjectOfType<AITest.Learning.EpisodeManager>();
-            enemyBrain = FindObjectOfType<AITest.Enemy.EnemyBrain>();
+            metricsCollector = FindFirstObjectByType<AITest.Metrics.MetricsCollector>();
+            episodeManager = FindFirstObjectByType<AITest.Learning.EpisodeManager>();
+            enemyBrain = FindFirstObjectByType<AITest.Enemy.EnemyBrain>();
 
             // Create action bars
             CreateActionBars();

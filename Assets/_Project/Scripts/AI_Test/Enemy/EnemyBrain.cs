@@ -235,9 +235,9 @@ namespace AITest.Enemy
                     }
                     else if (stateExtractor)
                     {
-                        // Use RLStateKey for masking
-                        var fullState = stateExtractor.ExtractState();
-                        validActions = actionMasker.GetValidActions(fullState);
+                        // Legacy Full State Masking (Disabled)
+                        // This path is deprecated in favor of 162-state optimized mode
+                        validActions = null; 
                     }
                 }
 
@@ -286,19 +286,13 @@ namespace AITest.Enemy
                     Debug.Log($"  State: {simpleState}");
                 }
 
-                // ? PROMPT 16: Show masked actions
+                // ? PROMPT 16: Show masked actions (Mask logging disabled for optimization)
+                /*
                 if (actionMasker)
                 {
-                    var maskReasons = actionMasker.GetAllMaskReasons();
-                    if (maskReasons.Count > 0)
-                    {
-                        Debug.Log($"  Masked actions:");
-                        foreach (var kvp in maskReasons)
-                        {
-                            Debug.Log($"    {kvp.Key}: {kvp.Value}");
-                        }
-                    }
+                     // (Optional) Implement GetAllMaskReasons in ActionMasker if detailed debug needed
                 }
+                */
 
                 if (showDebugLogs)
                 {
@@ -308,14 +302,13 @@ namespace AITest.Enemy
                     if (useSimpleStateExtractor)
                     {
                         var s = simpleStateExtractor.ExtractState();
-                        string vis = s.playerVisible == 1 ? "YES" : "NO";
-                        string dist = s.distanceBucket == 0 ? "CLOSE" : (s.distanceBucket == 1 ? "MED" : "FAR");
-                        string sect = s.lastSeenSector == 0 ? "SAME" : (s.lastSeenSector == 1 ? "DIFF" : "UNK");
-                        string time = s.timeSinceContactBucket == 0 ? "NEW" : (s.timeSinceContactBucket == 1 ? "OLD" : "V.OLD");
-                        string heatH = s.heatHereBucket == 0 ? "COLD" : (s.heatHereBucket == 1 ? "WARM" : "HOT");
-                        string heatN = s.heatNearbyBucket == 0 ? "COLD" : (s.heatNearbyBucket == 1 ? "WARM" : "HOT");
+                        string pres = s.playerPresence == 0 ? "VIS" : (s.playerPresence == 1 ? "HRD" : "LST");
+                        string room = s.roomContext == 0 ? "SAME" : (s.roomContext == 1 ? "ADJ" : "FAR");
+                        string heatH = s.heatHere == 0 ? "CLD" : (s.heatHere == 1 ? "WRM" : "HOT");
+                        string heatN = s.heatNearby == 0 ? "CLD" : (s.heatNearby == 1 ? "WRM" : "HOT");
+                        string phase = s.strategicPhase == 0 ? "EARLY" : "PANIC";
                         
-                        _debugLastStateStr = $"Vis:{vis} Dist:{dist} Sect:{sect} Time:{time} Heat:{heatH}/{heatN}";
+                        _debugLastStateStr = $"Pres:{pres} Room:{room} Heat:{heatH}/{heatN} Phase:{phase}";
                     }
                     else
                     {
@@ -362,8 +355,7 @@ namespace AITest.Enemy
             // ? 4. Update state extractor (last action)
             if (stateExtractor)
                 stateExtractor.SetLastAction(lastAction);
-            if (simpleStateExtractor)
-                simpleStateExtractor.SetLastAction(lastAction);
+            // if (simpleStateExtractor) simpleStateExtractor.SetLastAction(lastAction); // Removed in new architecture
 
             // ? Debug log
             if (showDebugLogs)
@@ -506,8 +498,7 @@ namespace AITest.Enemy
                     return patrolOption;
                 case EnemyMode.InvestigateLastHeard:
                     return investigateOption;
-                case EnemyMode.HeatSearchPeak:
-                    return heatSearchOption;
+                // case EnemyMode.HeatSearchPeak: return heatSearchOption; // REMOVED
                 case EnemyMode.SweepArea:
                     return sweepOption;
                 case EnemyMode.HideSpotCheck:
@@ -540,7 +531,7 @@ namespace AITest.Enemy
                 if (Random.value < 0.5f)
                     return EnemyMode.AmbushHotChoke;
                 else
-                    return EnemyMode.HeatSearchPeak;
+                    return EnemyMode.HeatSweep; // Was HeatSearchPeak
             }
 
             if (state.nearHideSpots == 1)

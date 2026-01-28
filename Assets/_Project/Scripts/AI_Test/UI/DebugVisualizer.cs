@@ -121,28 +121,28 @@ namespace AITest.UI
             {
                 var state = enemyBrain.simpleStateExtractor.ExtractState();
                 
-                // 1. Visible
-                GUILayout.Label($"Player Visible: {(state.playerVisible == 1 ? "YES" : "NO")}");
+                // 1. Player Presence
+                string presStr = state.playerPresence == 0 ? "VISIBLE" : (state.playerPresence == 1 ? "HEARD (RECENT)" : "LOST/OLD");
+                GUILayout.Label($"Presence: {presStr}");
                 
-                // 2. Distance
-                string distStr = state.distanceBucket == 0 ? "CLOSE" : (state.distanceBucket == 1 ? "MEDIUM" : "FAR");
-                GUILayout.Label($"Distance: {distStr}");
+                // 2. Room Context
+                string roomStr = state.roomContext == 0 ? "SAME ROOM" : (state.roomContext == 1 ? "ADJACENT" : "FAR/UNKNOWN");
+                GUILayout.Label($"Room Context: {roomStr}");
                 
-                // 3. Last Seen Sector
-                string sectorStr = state.lastSeenSector == 0 ? "SAME" : (state.lastSeenSector == 1 ? "DIFFERENT" : "UNKNOWN");
-                GUILayout.Label($"Last Seen Sector: {sectorStr}");
-                
-                // 4. Time Since Contact
-                string timeStr = state.timeSinceContactBucket == 0 ? "RECENT (<2s)" : (state.timeSinceContactBucket == 1 ? "OLD (3-6s)" : "VERY OLD");
-                GUILayout.Label($"Time Since Contact: {timeStr}");
-
-                // 5. Heat Here
-                string heatHere = state.heatHereBucket == 2 ? "HOT" : (state.heatHereBucket == 1 ? "WARM" : "COLD");
+                // 3. Heat Here
+                string heatHere = state.heatHere == 2 ? "HOT" : (state.heatHere == 1 ? "WARM" : "COLD");
                 GUILayout.Label($"Heat Here: {heatHere}");
                 
-                // 6. Heat Nearby
-                string heatNear = state.heatNearbyBucket == 2 ? "HOT" : (state.heatNearbyBucket == 1 ? "WARM" : "COLD");
+                // 4. Heat Nearby
+                string heatNear = state.heatNearby == 2 ? "HOT" : (state.heatNearby == 1 ? "WARM" : "COLD");
                 GUILayout.Label($"Heat Nearby: {heatNear}");
+
+                // 5. Phase
+                string phaseStr = state.strategicPhase == 0 ? "EARLY/MID" : "ENDGAME (PANIC)";
+                GUILayout.Label($"Phase: {phaseStr}");
+
+                GUILayout.Space(5);
+                GUILayout.Label($"Key: {state.GetHashKey()} / 162");
             }
             else
             {

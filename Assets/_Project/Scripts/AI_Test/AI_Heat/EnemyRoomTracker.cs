@@ -16,7 +16,40 @@ namespace AITest.Heat
         
         // State tracking
         private string currentRoomId = null;
-        
+        private float checkInterval = 0.5f;
+        private float nextCheckTime = 0f;
+
+        private void Start()
+        {
+            // Initial check
+            CheckRoomAtPosition();
+        }
+
+        private void Update()
+        {
+            // Fallback: If unknown room, check periodically
+            if (string.IsNullOrEmpty(currentRoomId) && Time.time >= nextCheckTime)
+            {
+                CheckRoomAtPosition();
+                nextCheckTime = Time.time + checkInterval;
+            }
+        }
+
+        private void CheckRoomAtPosition()
+        {
+            if (AITest.World.WorldRegistry.Instance)
+            {
+                if (AITest.World.WorldRegistry.Instance.TryGetRoomAtPosition(transform.position, out string roomId))
+                {
+                     if (currentRoomId != roomId)
+                     {
+                         currentRoomId = roomId;
+                         if (showDebugLogs) Debug.Log($"[EnemyRoomTracker] Force updated room: {currentRoomId}");
+                     }
+                }
+            }
+        }
+
         private void OnTriggerEnter2D(Collider2D other)
         {
             var roomTrigger = other.GetComponent<AITest.World.RoomZone>();

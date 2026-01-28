@@ -16,7 +16,7 @@ namespace AITest.Enemy
     {
         Patrol = 0,
         InvestigateLastHeard = 1,
-        HeatSearchPeak = 2,
+        // HeatSearchPeak = 2, // REMOVED (Redundant with HeatSweep)
         SweepArea = 3,
         HideSpotCheck = 4,
         HeatSweep = 5,          // NEW: Room transition heat-based sweep

@@ -28,6 +28,7 @@ namespace AITest.Enemy
         private bool hasTarget = false;
 
         public bool IsMoving => hasTarget && moveSpeed > 0.01f;
+        public Vector2 Velocity => rb ? rb.linearVelocity : Vector2.zero;
 
         private void Awake()
         {

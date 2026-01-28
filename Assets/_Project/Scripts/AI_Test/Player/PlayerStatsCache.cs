@@ -18,7 +18,7 @@ namespace AITest.Player
             {
                 if (monitor == null)
                 {
-                    monitor = Object.FindObjectOfType<PlayerStatsMonitor>();
+                    monitor = Object.FindFirstObjectByType<PlayerStatsMonitor>();
                 }
 
                 return monitor != null ? monitor.PlayerStyleBucket : 0;
@@ -32,7 +32,7 @@ namespace AITest.Player
         {
             if (monitor == null)
             {
-                monitor = Object.FindObjectOfType<PlayerStatsMonitor>();
+                monitor = Object.FindFirstObjectByType<PlayerStatsMonitor>();
             }
             return monitor;
         }

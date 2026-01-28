@@ -32,13 +32,13 @@ namespace AITest.Heat
         
         [Header("Weight Multipliers")]
         [Tooltip("Base weight for normal walk transitions")]
-        public float walkWeight = 1.0f;
+        public float walkWeight = 4.0f;
         
         [Tooltip("Weight multiplier for sprint transitions")]
-        public float sprintWeightMultiplier = 2.0f;
+        public float sprintWeightMultiplier = 2.5f;
         
         [Tooltip("Node heat boost when player interacts in room")]
-        public float interactionNodeBoost = 0.5f;
+        public float interactionNodeBoost = 5.0f;
         
         [Header("Choke Point Detection")]
         [Tooltip("Percentile threshold for choke points (0-1)")]
@@ -432,6 +432,24 @@ namespace AITest.Heat
                 return 1; // Warm
             else
                 return 2; // Hot
+        }
+
+        /// <summary>
+        /// Clear all heat data (for episode reset)
+        /// </summary>
+        public void ClearAllHeat()
+        {
+            nodeHeat.Clear();
+            edgeHeat.Clear();
+            if (showDebugLogs) Debug.Log("<color=yellow>[TransitionHeatGraph] CLEARED ALL HEAT DATA</color>");
+        }
+
+        /// <summary>
+        /// Get the room with the absolute highest node heat
+        /// </summary>
+        public string GetHottestRoom()
+        {
+            return GetPeakRoom(); // Use existing GetPeakRoom method alias
         }
         
         #endregion

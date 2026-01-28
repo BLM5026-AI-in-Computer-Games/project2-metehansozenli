@@ -30,13 +30,13 @@ namespace AITest.WorldModel
         
         [Header("Event Weights")]
         [Tooltip("Heat spike on see event")]
-        [Range(0f, 2f)] public float seeEventWeight = 1.5f;
+        [Range(0f, 10f)] public float seeEventWeight = 5.0f;
         
         [Tooltip("Heat spike on hear event")]
-        [Range(0f, 2f)] public float hearEventWeight = 1.0f;
+        [Range(0f, 10f)] public float hearEventWeight = 3.0f;
         
         [Tooltip("Heat spike on clue event")]
-        [Range(0f, 2f)] public float clueEventWeight = 0.6f;
+        [Range(0f, 10f)] public float clueEventWeight = 1.5f;
         
         [Header("Neighbor Propagation")]
         [Tooltip("Propagate heat to neighbor rooms (hear/clue events)")]
@@ -94,6 +94,17 @@ namespace AITest.WorldModel
             // Subscribe to perception events (via ClueEventBus)
             // Note: Perception doesn't use UnityEvents, uses direct callbacks
             // TODO: Migrate to event-based system if needed
+        }
+
+        private void Start()
+        {
+            // ? FORCE PARAMETER OVERRIDE (To fix configuration issues)
+            seeEventWeight = 6.0f;  // HIGH
+            hearEventWeight = 3.5f; // MEDIUM-HIGH
+            clueEventWeight = 2.0f; // MEDIUM
+            
+            if (showDebugLogs) 
+                Debug.Log($"[EnemyWorldModel] Forced Heat Weights: See={seeEventWeight}, Hear={hearEventWeight}");
         }
 
         private void OnDisable()
@@ -237,7 +248,7 @@ namespace AITest.WorldModel
             // Reduce heat significantly (enemy checked this room)
             if (TransitionHeatGraph.Instance)
             {
-                TransitionHeatGraph.Instance.MultiplyNodeHeat(roomId, 0.1f); // 90% reduction
+                TransitionHeatGraph.Instance.MultiplyNodeHeat(roomId, 0.8f); // 20% reduction only (was 90%)
             }
             
             if (showDebugLogs)
