@@ -2,349 +2,388 @@ using UnityEngine;
 using AITest.WorldModel;
 using AITest.World;
 using AITest.Heat;
+using AITest.Quest;
 
 namespace AITest.Learning
 {
     /// <summary>
-    /// Simple State Extractor - MINIMAL MDP for Tabular Q-Learning
+    /// Simple State Extractor - OPTIMIZED MDP for Tabular Q-Learning
     /// 
-    /// PROFESSOR FEEDBACK: State space too large for tabular Q-learning.
-    /// Solution: Compress to SMALL state space
+    /// RATIONALE: Previous 486-state space had overlapping features and distance hallucinations.
+    /// This new 162-state architecture relies on topological (Room) context and Heatmaps.
     /// 
-    /// State Features (6 features - UPDATED):
-    /// 1. playerVisible: bool (2 values: visible/not visible)
-    /// 2. distanceBucket: int (3 values: close/medium/far)
-    /// 3. lastSeenSector: int (3 values: same/different/unknown)
-    /// 4. timeSinceContactBucket: int (3 values: 0-2s/3-6s/7+s)
-    /// 5. heatHereBucket: int (3 values: cold/warm/hot) - NEW
-    /// 6. heatNearbyBucket: int (3 values: cold/warm/hot) - NEW
+    /// State Features (5 features):
+    /// 1. PlayerPresence (3): 0=Visible, 1=HeardRecent, 2=Lost/Old
+    /// 2. RoomContext (3): 0=SameRoom, 1=AdjacentRoom, 2=Far/Unknown
+    /// 3. HeatHere (3): 0=Cold, 1=Warm, 2=Hot
+    /// 4. HeatNearby (3): 0=Cold, 1=Warm, 2=Hot
+    /// 5. StrategicPhase (2): 0=Early/Mid, 1=EndGame (Panic)
     /// 
-    /// State Space Size: 2 × 3 × 3 × 3 × 3 × 3 = 486 states
-    /// 
-    /// This is still manageable for 500 episodes (~1 visit per state on average).
+    /// Total States: 3 * 3 * 3 * 3 * 2 = 162 states.
+    /// This ensures extremely fast convergence (<200 episodes).
     /// </summary>
     public class SimpleStateExtractor : MonoBehaviour
     {
         [Header("References")]
         public EnemyWorldModel worldModel;
         public Transform enemyTransform;
-        public Transform playerTransform;
+        public EnemyRoomTracker roomTracker;
+        public TransitionHeatGraph heatGraph;
         
-        [Header("Distance Thresholds")]
-        [Tooltip("Close threshold (meters)")]
-        public float distCloseThreshold = 8f;
+        [Header("Thresholds")]
+        [Tooltip("Contact considered 'Recent' if less than this time (seconds)")]
+        public float recentContactThreshold = 5f;
         
-        [Tooltip("Far threshold (meters)")]
-        public float distFarThreshold = 16f;
-        // Medium = between close and far
-        
-        [Header("Time Thresholds")]
-        [Tooltip("Recent contact (0-2 seconds)")]
-        public float timeRecentThreshold = 2f;
-        
-        [Tooltip("Old contact (3-6 seconds)")]
-        public float timeOldThreshold = 6f;
-        // Very old = 7+ seconds
-        
-        [Header("Sector Tolerance")]
-        [Tooltip("Distance to consider 'same sector' (meters)")]
-        public float sameSectorRadius = 5f;
-        
-        [Header("Heat Thresholds")]
         [Tooltip("Heat threshold for 'warm' bucket")]
-        public float heatWarmThreshold = 5f;
+        public float heatWarmThreshold = 0.5f; // Lowered from 5f
         
         [Tooltip("Heat threshold for 'hot' bucket")]
-        public float heatHotThreshold = 20f;
+        public float heatHotThreshold = 2.0f; // Lowered from 20f
         
+        [Tooltip("Game phase switches to EndGame if Quest Progress > this %")]
+        public float panicPhaseThreshold = 0.6f;
+
         [Header("Debug")]
         public bool showDebugLogs = false;
         
-        // Last action tracking
-        private int lastActionValue = 0;
-        
-        // Components
-        private AITest.Heat.EnemyRoomTracker roomTracker;
+        [Tooltip("If true, uses actual player position for state calculation (Cheat/Oracle Mode)")]
+        public bool useRealPlayerPosition = false;
 
         private void Awake()
         {
             // Auto-find components
-            if (!worldModel)
-                worldModel = GetComponent<EnemyWorldModel>();
-            
-            if (!enemyTransform)
-                enemyTransform = transform;
-            
-            // Find player (fallback)
-            if (!playerTransform)
-            {
-                var player = GameObject.FindGameObjectWithTag("Player");
-                if (player)
-                    playerTransform = player.transform;
-            }
-            
-            // Find room tracker
-            roomTracker = GetComponent<AITest.Heat.EnemyRoomTracker>();
+            if (!worldModel) worldModel = GetComponent<EnemyWorldModel>();
+            if (!enemyTransform) enemyTransform = transform;
+            if (!roomTracker) roomTracker = GetComponent<EnemyRoomTracker>();
+            if (!heatGraph) heatGraph = TransitionHeatGraph.Instance;
         }
 
         /// <summary>
-        /// Extract SIMPLE state (6 features → 486 states)
+        /// Extract Optimized State (162 states)
         /// </summary>
         public SimpleRLStateKey ExtractState()
         {
             SimpleRLStateKey state = new SimpleRLStateKey();
             
-            if (!worldModel)
-            {
-                Debug.LogWarning("[SimpleStateExtractor] WorldModel not found! Returning zero state.");
-                return state;
-            }
-            
-            // 1. PLAYER VISIBLE (binary: 0/1)
-            state.playerVisible = (byte)(worldModel.SeePlayerNow ? 1 : 0);
-            
-            // 2. DISTANCE BUCKET (3 values: 0=close, 1=medium, 2=far)
-            state.distanceBucket = (byte)GetDistanceBucket();
-            
-            // 3. LAST SEEN SECTOR (3 values: 0=same, 1=different, 2=unknown)
-            state.lastSeenSector = (byte)GetLastSeenSectorBucket();
-            
-            // 4. TIME SINCE CONTACT (3 values: 0=recent, 1=old, 2=very old)
-            state.timeSinceContactBucket = (byte)GetTimeSinceContactBucket();
-            
-            // 5. HEAT HERE BUCKET (3 values: 0=cold, 1=warm, 2=hot) - NEW
-            state.heatHereBucket = (byte)GetHeatHereBucket();
-            
-            // 6. HEAT NEARBY BUCKET (3 values: 0=cold, 1=warm, 2=hot) - NEW
-            state.heatNearbyBucket = (byte)GetHeatNearbyBucket();
-            
+            if (!worldModel) return state;
+
+            // 1. PLAYER PRESENCE (0=Vis, 1=Heard, 2=Lost)
+            state.playerPresence = (byte)GetPlayerPresence();
+
+            // 2. ROOM CONTEXT (0=Same, 1=Adj, 2=Far)
+            state.roomContext = (byte)GetRoomContext();
+
+            // 3. HEAT HERE (0=Cold, 1=Warm, 2=Hot)
+            state.heatHere = (byte)GetHeatHere();
+
+            // 4. HEAT NEARBY (0=Cold, 1=Warm, 2=Hot)
+            state.heatNearby = (byte)GetHeatNearby();
+
+            // 5. STRATEGIC PHASE (0=Early, 1=EndGame)
+            state.strategicPhase = (byte)GetStrategicPhase();
+
             if (showDebugLogs)
             {
-                Debug.Log($"<color=cyan>[SimpleStateExtractor] State: visible={state.playerVisible}, " +
-                          $"dist={state.distanceBucket}, sector={state.lastSeenSector}, time={state.timeSinceContactBucket} " +
-                          $"(key={state.GetHashKey()})</color>");
+                Debug.Log($"<color=cyan>[State] {state}</color>");
             }
             
             return state;
         }
+        
+        // Unused in optimized version but kept for interface compatibility
+        public void SetLastAction(AITest.Enemy.EnemyMode action) { }
 
-        /// <summary>
-        /// Set last action (for future use)
-        /// </summary>
-        public void SetLastAction(AITest.Enemy.EnemyMode mode)
+        // --- FEATURE EXTRACTORS ---
+
+        private int GetPlayerPresence()
         {
-            lastActionValue = (int)mode;
+            // Priority 1: Vision
+            if (worldModel.SeePlayerNow) 
+                return 0; // Visible (Highest Priority)
+
+            // Priority 2: Recent Hearing (or very recent sight memory)
+            float lowestTime = Mathf.Min(worldModel.TimeSinceSeen, worldModel.TimeSinceHeard);
+            if (lowestTime < recentContactThreshold)
+                return 1; // Heard/Fresh
+
+            // Priority 3: Lost
+            return 2; // Lost/Old
         }
 
-        /// <summary>
-        /// Get distance bucket (0-2)
-        /// 0: Close (0-8m) - Player is nearby
-        /// 1: Medium (8-16m) - Player is at medium distance
-        /// 2: Far (16+m) - Player is far away or unknown
-        /// </summary>
-        private int GetDistanceBucket()
+        private int GetRoomContext()
         {
-            Vector2 targetPos = Vector2.zero;
-            
-            // Determine target position (priority: see > heard > heatmap)
-            if (worldModel.SeePlayerNow && playerTransform)
+            // If we don't know where we are, we are lost/far
+            string myRoom = roomTracker ? roomTracker.GetCurrentRoom() : "";
+            if (string.IsNullOrEmpty(myRoom)) return 2; // Unknown
+
+            // Get last known player pos
+            Vector2 targetPos = GetBestTargetPos();
+            if (targetPos == Vector2.zero) return 2; // Unknown target
+
+            // Topological Check: Which room is the player in?
+            string playerRoom = "";
+            bool foundRoom = WorldRegistry.Instance && WorldRegistry.Instance.TryGetRoomAtPosition(targetPos, out playerRoom);
+
+            if (foundRoom)
             {
-                targetPos = playerTransform.position;
-            }
-            else if (worldModel.TimeSinceHeard < 10f && worldModel.LastHeardPos != Vector2.zero)
-            {
-                targetPos = worldModel.LastHeardPos;
-            }
-            else
-            {
-                // Fallback: center of hottest room by node heat
-                targetPos = Vector2.zero;
-                if (TransitionHeatGraph.Instance && AITest.World.WorldRegistry.Instance)
+                if (playerRoom == myRoom) return 0; // Same Room
+
+                // Check Adjacent
+                if (heatGraph)
                 {
-                    string peakRoom = TransitionHeatGraph.Instance.GetPeakRoom();
-                    var room = AITest.World.WorldRegistry.Instance.GetRoom(peakRoom);
-                    if (room != null)
-                        targetPos = room.Center;
+                    var adjacent = heatGraph.GetAdjacentRooms(myRoom);
+                    if (adjacent != null && adjacent.Contains(playerRoom))
+                        return 1; // Adjacent Room
                 }
             }
-            // If no target found, consider it far
-            if (targetPos == Vector2.zero)
-                return 2;
-            
-            float dist = Vector2.Distance(enemyTransform.position, targetPos);
-            
-            if (dist < distCloseThreshold) return 0;    // Close
-            if (dist < distFarThreshold) return 1;      // Medium
-            return 2;                                   // Far
+            else
+            {
+                // ? FALLBACK: If player is Visible but not in a registered room (e.g. doorway), use Euclidean distance
+                if (worldModel.SeePlayerNow)
+                {
+                    float dist = Vector2.Distance(enemyTransform.position, targetPos);
+                    if (dist < 8.0f) return 0; // Close enough to be "Same Room" context
+                    if (dist < 15.0f) return 1; // Likely adjacent
+                }
+            }
+
+            return 2; // Far/Unknown
         }
 
-        /// <summary>
-        /// Get last seen sector bucket (0-2)
-        /// 0: Same sector - Enemy is in the same area as last known player position
-        /// 1: Different sector - Enemy is in a different area
-        /// 2: Unknown - No recent contact (7+ seconds)
-        /// </summary>
-        private int GetLastSeenSectorBucket()
+        private int GetHeatHere()
         {
-            // If no recent contact ? Unknown
-            float timeSinceAnyContact = Mathf.Min(worldModel.TimeSinceSeen, worldModel.TimeSinceHeard);
-            
-            if (timeSinceAnyContact > 7f)
-                return 2; // Unknown
-            
-            // Get last known position
-            Vector2 lastKnownPos = Vector2.zero;
-            
-            if (worldModel.TimeSinceSeen < worldModel.TimeSinceHeard)
+            if (!roomTracker || !heatGraph) return 0;
+            string myRoom = roomTracker.GetCurrentRoom();
+            if (string.IsNullOrEmpty(myRoom)) return 0;
+
+            // ? FIX: Read Node Heat (Perception), not Choke Score (Movement edges)
+            float score = heatGraph.GetNodeHeat(myRoom);
+            return BucketizeHeat(score);
+        }
+
+        private int GetHeatNearby()
+        {
+            if (!roomTracker || !heatGraph) return 0;
+            string myRoom = roomTracker.GetCurrentRoom();
+            if (string.IsNullOrEmpty(myRoom)) return 0;
+
+            // ? FIX: Check Neighbor Node Heat (Room contents), not Edge Heat (Path usage)
+            var neighbors = heatGraph.GetAdjacentRooms(myRoom);
+            if (neighbors == null || neighbors.Count == 0) return 0;
+
+            float maxHeat = 0f;
+            foreach (var neighbor in neighbors)
             {
-                lastKnownPos = worldModel.LastSeenPos;
+                float h = heatGraph.GetNodeHeat(neighbor);
+                if (h > maxHeat) maxHeat = h;
+            }
+            
+            return BucketizeHeat(maxHeat);
+        }
+
+        private int BucketizeHeat(float val)
+        {
+            if (val < heatWarmThreshold) return 0; // Cold
+            if (val < heatHotThreshold) return 1;  // Warm
+            return 2;                              // Hot
+        }
+
+        private int GetStrategicPhase()
+        {
+            // Hook into QuestManager
+            var qm = QuestManager.Instance;
+            if (qm)
+            {
+                float progress = qm.GetProgress();
+                if (progress >= panicPhaseThreshold) return 1; // EndGame/Panic
+            }
+            
+            return 0; // Normal Phase
+        }
+
+        // --- DEBUG GUI ---
+        private void OnGUI()
+        {
+            if (!showDebugLogs) return;
+
+            GUILayout.BeginArea(new Rect(10, 200, 300, 220), GUI.skin.box);
+            GUILayout.Label("<b>--- STATE DEBUGGER ---</b>");
+            
+            string myRoom = roomTracker ? roomTracker.GetCurrentRoom() : "null";
+            GUILayout.Label($"Enemy Room: {myRoom}");
+
+            string targetSrc = "None";
+            Vector2 targetPos = GetBestTargetPos(out targetSrc);
+            string targetRoom = "Unknown";
+            if (WorldRegistry.Instance)
+                WorldRegistry.Instance.TryGetRoomAtPosition(targetPos, out targetRoom);
+            
+            GUILayout.Label($"Target Pos: {targetPos}");
+            GUILayout.Label($"Target Room (Belief): {targetRoom}");
+            
+            // ? DEBUG HEATMAP status
+            if (heatGraph)
+            {
+                string hotRoom = heatGraph.GetHottestRoom();
+                float hotVal = heatGraph.GetNodeHeat(hotRoom);
+                GUILayout.Label($"Hottest Room: {hotRoom} ({hotVal:F2})");
             }
             else
             {
-                lastKnownPos = worldModel.LastHeardPos;
+                GUILayout.Label("HeatGraph: <color=red>NULL</color>");
+            }
+
+            // ? DEBUG: Show REAL player room for comparison
+            string realPlayerRoom = "Unknown";
+            if (worldModel.perception && worldModel.perception.player)
+            {
+                Vector2 realPos = worldModel.perception.player.position;
+                if (WorldRegistry.Instance)
+                    WorldRegistry.Instance.TryGetRoomAtPosition(realPos, out realPlayerRoom);
+            }
+            GUILayout.Label($"Real Player Room: <color=lime>{realPlayerRoom}</color>");
+
+            GUILayout.Label($"Source: <color=yellow>{targetSrc}</color>");
+            
+            var state = ExtractState();
+            GUILayout.Label($"<b>State ID: {state.GetHashKey()}</b>");
+            GUILayout.Label($"Presence: {state.playerPresence} (0=Vis, 1=Hrd, 2=Lst)");
+            GUILayout.Label($"Context: {state.roomContext} (0=Same, 1=Adj, 2=Far)");
+            GUILayout.Label($"Heat: {state.heatHere} / {state.heatNearby}");
+            
+            GUILayout.EndArea();
+        }
+        
+        // Overload for internal use
+        private Vector2 GetBestTargetPos()
+        {
+            return GetBestTargetPos(out _);
+        }
+
+        private Vector2 GetBestTargetPos(out string source)
+        {
+            source = "None";
+            
+            // ? CHEAT MODE: Use Real Player Position (Oracle)
+            // This makes the state space deterministically correct based on ground truth,
+            // speeding up training but making the agent "Psychic".
+            if (useRealPlayerPosition && worldModel.perception && worldModel.perception.player)
+            {
+                source = "Oracle(Cheat)";
+                return worldModel.perception.player.position;
             }
             
-            if (lastKnownPos == Vector2.zero)
-                return 2; // Unknown
+            // 1. VISION (Real-time)
+            if (worldModel.SeePlayerNow)
+            {
+                source = "Visible";
+                // ? FIX: Use REAL position if visible
+                if (worldModel.perception && worldModel.perception.player)
+                    return worldModel.perception.player.position;
+                
+                return worldModel.LastSeenPos; 
+            }
             
-            // Check if in same sector
-            float dist = Vector2.Distance(enemyTransform.position, lastKnownPos);
+            string myRoom = roomTracker ? roomTracker.GetCurrentRoom() : "";
             
-            if (dist < sameSectorRadius)
-                return 0; // Same sector
-            else
-                return 1; // Different sector
+            // 2. VISION MEMORY (Last Seen)
+            // Only use if we haven't checked/cleared it yet
+            // If we are in the LastSeenRoom and don't see player, assume it's stale!
+            bool seenValid = worldModel.HasSeenRecently;
+            if (seenValid && !string.IsNullOrEmpty(myRoom) && myRoom == worldModel.LastSeenRoom)
+            {
+                 // We are in the room where we last saw the player, but SeePlayerNow is false.
+                 // So the player is GONE. Ignore this memory.
+                 seenValid = false;
+            }
+
+            // 3. HEARING MEMORY
+            bool heardValid = worldModel.HasHeardRecently;
+            if (heardValid && !string.IsNullOrEmpty(myRoom) && myRoom == worldModel.LastHeardRoom && worldModel.TimeSinceHeard > 5.0f)
+            {
+                // We are in the room where we heard something >5s ago, and nobody is here.
+                // Ignore.
+                heardValid = false;
+            }
+            
+            // Decision: Seen vs Heard vs Heat
+            
+            if (seenValid)
+            {
+                if (!heardValid || worldModel.TimeSinceSeen <= worldModel.TimeSinceHeard)
+                {
+                    source = "Memory(Seen)";
+                    return worldModel.LastSeenPos;
+                }
+            }
+            
+            if (heardValid)
+            {
+                source = "Memory(Heard)";
+                return worldModel.LastHeardPos;
+            }
+
+            // 4. HEAT GRAPH (Strategic)
+            if (heatGraph)
+            {
+                string hotRoom = heatGraph.GetHottestRoom();
+                
+                // If hot room is MY room, and I see nothing, look for next hottest?
+                // For now just stick to hottest.
+                if (!string.IsNullOrEmpty(hotRoom) && WorldRegistry.Instance)
+                {
+                    var r = WorldRegistry.Instance.GetRoom(hotRoom);
+                    if (r != null)
+                    {
+                        source = $"Heat({hotRoom})";
+                        return r.Center;
+                    }
+                }
+            }
+
+            source = "None";
+            return Vector2.zero;
         }
 
-        /// <summary>
-        /// Get time since contact bucket (0-2)
-        /// 0: Recent (0-2 seconds) - Just saw/heard player
-        /// 1: Old (3-6 seconds) - Some time has passed
-        /// 2: Very old (7+ seconds) - Long time since contact
-        /// </summary>
-        private int GetTimeSinceContactBucket()
-        {
-            // Use the MINIMUM time (most recent contact)
-            float timeSinceContact = Mathf.Min(worldModel.TimeSinceSeen, worldModel.TimeSinceHeard);
-            
-            if (timeSinceContact < timeRecentThreshold) return 0;  // Recent
-            if (timeSinceContact < timeOldThreshold) return 1;     // Old
-            return 2;                                              // Very old
-        }
-
-        /// <summary>
-        /// Get heat here bucket (0-2)
-        /// 0: Cold (< 5 heat) - Little traffic in current room
-        /// 1: Warm (5-20 heat) - Moderate traffic
-        /// 2: Hot (>20 heat) - Heavy traffic/choke point
-        /// </summary>
-        private int GetHeatHereBucket()
-        {
-            if (!roomTracker || !TransitionHeatGraph.Instance)
-                return 0; // Default to cold
-            
-            string currentRoom = roomTracker.GetCurrentRoom();
-            if (string.IsNullOrEmpty(currentRoom))
-                return 0; // Not in any room
-            
-            float chokeScore = TransitionHeatGraph.Instance.GetChokeScore(currentRoom);
-            
-            if (chokeScore < heatWarmThreshold) return 0;  // Cold
-            if (chokeScore < heatHotThreshold) return 1;   // Warm
-            return 2;                                       // Hot
-        }
-
-        /// <summary>
-        /// Get heat nearby bucket (0-2)
-        /// 0: Cold (< 5 heat) - No hot paths nearby or low room heat
-        /// 1: Warm (5-20 heat) - Some hot paths adjacent or moderate room heat
-        /// 2: Hot (>20 heat) - Very hot path adjacent or high room heat
-        /// </summary>
-        private int GetHeatNearbyBucket()
-        {
-            if (!roomTracker || !TransitionHeatGraph.Instance)
-                return 0; // Default to cold
-            
-            string currentRoom = roomTracker.GetCurrentRoom();
-            if (string.IsNullOrEmpty(currentRoom))
-                return 0; // Not in any room
-            
-            // Check both: adjacent edge heat (transitions) AND node heat (dwelling in room)
-            float maxAdjacentHeat = TransitionHeatGraph.Instance.GetMaxAdjacentEdgeHeat(currentRoom);
-            
-            // ✅ ALSO check current room's node heat (player is dwelling here)
-            float nodeHeat = TransitionHeatGraph.Instance.GetNodeHeat(currentRoom);
-            
-            // Take maximum of both
-            float totalHeat = Mathf.Max(maxAdjacentHeat, nodeHeat);
-            
-            if (totalHeat < heatWarmThreshold) return 0;  // Cold
-            if (totalHeat < heatHotThreshold) return 1;   // Warm
-            return 2;                                      // Hot
-        }
-
-        /// <summary>
-        /// Get state space size (for debugging)
-        /// </summary>
+        // --- DEBUG ---
         public int GetStateSpaceSize()
         {
-            // 2 × 3 × 3 × 3 × 3 × 3 = 486 states
-            return 2 * 3 * 3 * 3 * 3 * 3;
-        }
-
-        /// <summary>
-        /// Reset state (for testing)
-        /// </summary>
-        public void ResetState()
-        {
-            lastActionValue = 0;
-            Debug.Log("<color=yellow>[SimpleStateExtractor] State reset</color>");
+            return 3 * 3 * 3 * 3 * 2; // 162
         }
     }
 
     /// <summary>
-    /// Simple RL State Key - 4 features (54 states total)
+    /// OPTIMIZED State Key (162 states)
     /// </summary>
     [System.Serializable]
     public struct SimpleRLStateKey
     {
-        public byte playerVisible;         // 0/1 (2 values)
-        public byte distanceBucket;        // 0/1/2 (3 values)
-        public byte lastSeenSector;        // 0/1/2 (3 values)
-        public byte timeSinceContactBucket; // 0/1/2 (3 values)
-        public byte heatHereBucket;        // 0/1/2 (3 values) - NEW
-        public byte heatNearbyBucket;      // 0/1/2 (3 values) - NEW
+        public byte playerPresence; // 0-2 (3)
+        public byte roomContext;    // 0-2 (3)
+        public byte heatHere;       // 0-2 (3)
+        public byte heatNearby;     // 0-2 (3)
+        public byte strategicPhase; // 0-1 (2)
 
         /// <summary>
-        /// Generate hash key for Q-table lookup
-        /// Maps 6 features to unique integer (0-485)
+        /// Generate unique hash key [0..161]
         /// </summary>
         public int GetHashKey()
         {
-            // Formula: key = v*243 + d*81 + s*27 + t*9 + hh*3 + hn
-            // Ranges:
-            //   playerVisible: [0,1] → multiply by 243
-            //   distanceBucket: [0,2] → multiply by 81
-            //   lastSeenSector: [0,2] → multiply by 27
-            //   timeSinceContactBucket: [0,2] → multiply by 9
-            //   heatHereBucket: [0,2] → multiply by 3
-            //   heatNearbyBucket: [0,2] → multiply by 1
+            // Formula: Mixed radix encoding
+            // Key = P*54 + R*18 + HH*6 + HN*2 + SP
+            // Max = 2*54 + 2*18 + 2*6 + 2*2 + 1 = 108 + 36 + 12 + 4 + 1 = 161
             
-            int key = playerVisible * 243 +
-                      distanceBucket * 81 +
-                      lastSeenSector * 27 +
-                      timeSinceContactBucket * 9 +
-                      heatHereBucket * 3 +
-                      heatNearbyBucket;
-            
+            int key = playerPresence * 54 +
+                      roomContext * 18 +
+                      heatHere * 6 +
+                      heatNearby * 2 +
+                      strategicPhase;
             return key;
         }
 
         public override string ToString()
         {
-            return $"[Simple State: visible={playerVisible}, dist={distanceBucket}, " +
-                   $"sector={lastSeenSector}, time={timeSinceContactBucket}, " +
-                   $"heatHere={heatHereBucket}, heatNearby={heatNearbyBucket}, key={GetHashKey()}]";
+            return $"[State: Pres={playerPresence}, Room={roomContext}, Heat={heatHere}/{heatNearby}, Phase={strategicPhase} | Key={GetHashKey()}]";
         }
     }
 }

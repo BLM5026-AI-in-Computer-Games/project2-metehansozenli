@@ -138,6 +138,9 @@ namespace AITest.Learning
                 Debug.Log($"  Features: {best.features}");
             }
             
+            // LOGGING
+            LogTacticalChoice("Patrol", candidates);
+
             return best;
         }
 
@@ -346,6 +349,117 @@ namespace AITest.Learning
             Debug.Log("<color=cyan>===== HIDESPOT SCORER =====</color>");
             Debug.Log(hideSpotScorer.GetWeightSummary());
 
+        }
+        // --- LOGGING & METRICS ---
+        private int searchEfficiencyCounter = 0;
+        private Dictionary<AITest.Enemy.EnemyMode, int> actionDistribution = new Dictionary<AITest.Enemy.EnemyMode, int>();
+
+        /// <summary>
+        /// 1. Log Perceptron Weights to CSV
+        /// </summary>
+        public void LogPerceptronWeights()
+        {
+            string dir = System.IO.Path.Combine(Application.dataPath, "../TrainingData");
+            if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+
+            roomScorer.LogWeightsToCSV(System.IO.Path.Combine(dir, "perceptron_room_weights.csv"));
+            hideSpotScorer.LogWeightsToCSV(System.IO.Path.Combine(dir, "perceptron_hidespot_weights.csv"));
+        }
+
+        /// <summary>
+        /// 2. Log Tactical Choice (Candidates & Scores)
+        /// </summary>
+        private void LogTacticalChoice(string decisionType, List<RoomTarget> candidates)
+        {
+            string dir = System.IO.Path.Combine(Application.dataPath, "../TrainingData");
+            if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+            string path = System.IO.Path.Combine(dir, "tactical_choices.csv");
+
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                    System.IO.File.WriteAllText(path, "Time,DecisionType,Winner,WinnerScore,CandidateCount,Top5Candidates\n");
+
+                var best = candidates[0];
+                string top5 = "";
+                int count = Mathf.Min(5, candidates.Count);
+                for (int i = 0; i < count; i++)
+                {
+                    top5 += $"{candidates[i].roomId}({candidates[i].score:F2})|";
+                }
+
+                string line = $"{Time.time:F1},{decisionType},{best.roomId},{best.score:F3},{candidates.Count},{top5}\n";
+                System.IO.File.AppendAllText(path, line);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// 3. Track Search Efficiency (Called when entering a room or checking a spot)
+        /// </summary>
+        public void IncrementSearchEfficiency()
+        {
+            searchEfficiencyCounter++;
+        }
+
+        public void ResetSearchEfficiency()
+        {
+            searchEfficiencyCounter = 0;
+        }
+
+        public void LogCaptureEfficiency(float timeToCapture)
+        {
+            string dir = System.IO.Path.Combine(Application.dataPath, "../TrainingData");
+            if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+            string path = System.IO.Path.Combine(dir, "search_efficiency.csv");
+
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                    System.IO.File.WriteAllText(path, "Time,RoomsChecked,TimeToCapture\n");
+
+                string line = $"{Time.time:F1},{searchEfficiencyCounter},{timeToCapture:F2}\n";
+                System.IO.File.AppendAllText(path, line);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// 4. Track Macro Action (Called by EnemyBrain)
+        /// </summary>
+        public void TrackAction(AITest.Enemy.EnemyMode mode)
+        {
+            if (!actionDistribution.ContainsKey(mode))
+                actionDistribution[mode] = 0;
+            
+            actionDistribution[mode]++;
+        }
+
+        public void LogActionDistribution(int episode)
+        {
+            string dir = System.IO.Path.Combine(Application.dataPath, "../TrainingData");
+            if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+            string path = System.IO.Path.Combine(dir, "action_distribution.csv");
+
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                    System.IO.File.WriteAllText(path, "Episode,Non,Patrol,Investigate,SearchPeak,Sweep,HideCheck,HeatSweep,Ambush\n");
+
+                // Map enum to columns manually or iterating
+                int[] counts = new int[8]; // Assuming 8 modes define in EnemyMode
+                foreach(var kvp in actionDistribution)
+                {
+                    if ((int)kvp.Key < 8) counts[(int)kvp.Key] = kvp.Value;
+                }
+
+                string line = $"{episode}";
+                for(int i=0; i<8; i++) line += $",{counts[i]}";
+                line += "\n";
+
+                System.IO.File.AppendAllText(path, line);
+            }
+            catch { }
         }
     }
 }

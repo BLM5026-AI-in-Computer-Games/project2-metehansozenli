@@ -1,301 +1,84 @@
 using UnityEngine;
-using System.Collections.Generic;
-using AITest.Learning;
 using AITest.Enemy;
-// using AITest.World; // ❌ REMOVED: No longer using IntersectionPoints
+using System.Collections.Generic;
 
 namespace AITest.Learning
 {
     /// <summary>
-    /// Action Masker - Filter invalid actions for stable learning
-    /// 
-    /// PROMPT 16: Critical for Q-learning stability
-    /// - InvestigateLastHeard invalid if HearRecently==0
-    /// - HeatSearchPeak invalid if HeatConfidence==0
-    /// - HideSpotCheck invalid if NearHideSpots==0
-    /// - HeatSweep invalid if HeatConfidence < 1
-    /// - AmbushHotChoke invalid if HeatConfidence < 2 (uses RoomTracker/TransitionHeatGraph)
-    /// - Patrol always valid (fallback)
-    /// 
-    /// ❌ CutoffAmbush REMOVED: No longer using IntersectionPoints
+    /// Action Masker - Filters invalid actions based on State
+    /// UPDATED: Supports optimized 162-state architecture
     /// </summary>
     public class ActionMasker : MonoBehaviour
     {
-        [Header("Masking Rules")]
-        [Tooltip("Enable action masking")]
-        public bool enableMasking = true;
-        
-        [Tooltip("Always keep Patrol valid (fallback)")]
-        public bool patrolAlwaysValid = true;
-        
         [Header("Debug")]
         public bool showDebugLogs = false;
-        
-        // Mask reasons (for debug)
-        private Dictionary<EnemyMode, string> maskReasons = new Dictionary<EnemyMode, string>();
-        
-        /// <summary>
-        /// ? PROMPT 16: Get valid actions for current state
-        /// </summary>
-        public List<EnemyMode> GetValidActions(RLStateKey state)
-        {
-            maskReasons.Clear();
-            
-            if (!enableMasking)
-            {
-                // No masking - all actions valid (7 total - NO IntersectionPoint actions)
-                return new List<EnemyMode>
-                {
-                    EnemyMode.Patrol,
-                    EnemyMode.InvestigateLastHeard,
-                    EnemyMode.HeatSearchPeak,
-                    EnemyMode.SweepArea,
-                    EnemyMode.HideSpotCheck,
-                    // EnemyMode.CutoffAmbush,  // ❌ REMOVED: IntersectionPoint dependency
-                    EnemyMode.HeatSweep,        // ✅ RoomTracker-based
-                    EnemyMode.AmbushHotChoke    // ✅ RoomTracker-based (uses TransitionHeatGraph)
-                };
-            }
-            
-            var validActions = new List<EnemyMode>();
-            
-            // ? Patrol (always valid if configured)
-            if (patrolAlwaysValid || IsPatrolValid(state))
-            {
-                validActions.Add(EnemyMode.Patrol);
-            }
-            else
-            {
-                maskReasons[EnemyMode.Patrol] = "Patrol masked (custom rule)";
-            }
-            
-            // ? InvestigateLastHeard (requires recent audio cue)
-            if (IsInvestigateValid(state))
-            {
-                validActions.Add(EnemyMode.InvestigateLastHeard);
-            }
-            else
-            {
-                maskReasons[EnemyMode.InvestigateLastHeard] = "No recent audio cue (hearRecently=0)";
-            }
-            
-            // ? HeatSearchPeak (requires heat confidence)
-            if (IsHeatSearchValid(state))
-            {
-                validActions.Add(EnemyMode.HeatSearchPeak);
-            }
-            else
-            {
-                maskReasons[EnemyMode.HeatSearchPeak] = "Low heat confidence (heatConfidence=0)";
-            }
-            
-            // ? SweepArea (always valid - can sweep current room)
-            validActions.Add(EnemyMode.SweepArea);
-            
-            // ? HideSpotCheck (requires nearby hide spots)
-            if (IsHideSpotCheckValid(state))
-            {
-                validActions.Add(EnemyMode.HideSpotCheck);
-            }
-            else
-            {
-                maskReasons[EnemyMode.HideSpotCheck] = "No nearby hide spots (nearHideSpots=0)";
-            }
-            
-            // ❌ CutoffAmbush REMOVED: IntersectionPoint dependency, use AmbushHotChoke instead
-            
-            // ✅ HeatSweep (requires medium/high heat confidence)
-            if (IsHeatSweepValid(state))
-            {
-                validActions.Add(EnemyMode.HeatSweep);
-            }
-            else
-            {
-                maskReasons[EnemyMode.HeatSweep] = "Low heat confidence (heatConfidence < 1)";
-            }
-            
-            // ✅ AmbushHotChoke (requires high heat confidence - uses RoomTracker)
-            if (IsAmbushHotChokeValid(state))
-            {
-                validActions.Add(EnemyMode.AmbushHotChoke);
-            }
-            else
-            {
-                maskReasons[EnemyMode.AmbushHotChoke] = "Low heat confidence (requires heatConfidence >= 2)";
-            }
-            
-            // ? Fallback: Ensure at least one action is valid
-            if (validActions.Count == 0)
-            {
-                if (showDebugLogs)
-                    Debug.LogWarning("[ActionMasker] No valid actions! Forcing Patrol.");
-                
-                validActions.Add(EnemyMode.Patrol);
-            }
-            
-            if (showDebugLogs && maskReasons.Count > 0)
-            {
-                Debug.Log("<color=yellow>[ActionMasker] Masked actions:</color>");
-                foreach (var kvp in maskReasons)
-                {
-                    Debug.Log($"  {kvp.Key}: {kvp.Value}");
-                }
-            }
-            
-            return validActions;
-        }
-        
-        /// <summary>
-        /// Check if Patrol is valid
-        /// </summary>
-        private bool IsPatrolValid(RLStateKey state)
-        {
-            // Patrol always valid (configurable)
-            return patrolAlwaysValid;
-        }
-        
-        /// <summary>
-        /// Check if InvestigateLastHeard is valid
-        /// </summary>
-        private bool IsInvestigateValid(RLStateKey state)
-        {
-            // Requires recent hear OR see
-            return state.hearRecently == 1 || state.seePlayer == 1;
-        }
-        
-        /// <summary>
-        /// Check if HeatSearchPeak is valid
-        /// </summary>
-        private bool IsHeatSearchValid(RLStateKey state)
-        {
-            // Requires medium/high heat confidence
-            return state.heatConfidence >= 1; // Medium (1) or High (2)
-        }
-        
-        /// <summary>
-        /// Check if HideSpotCheck is valid
-        /// </summary>
-        private bool IsHideSpotCheckValid(RLStateKey state)
-        {
-            // Requires nearby hide spots
-            return state.nearHideSpots == 1;
-        }
-        
-        // ❌ IsCutoffAmbushValid REMOVED: No longer using IntersectionPoints
-        
-        /// <summary>
-        /// ✅ Check if HeatSweep is valid
-        /// </summary>
-        private bool IsHeatSweepValid(RLStateKey state)
-        {
-            // Requires medium/high heat confidence (same as HeatSearchPeak)
-            return state.heatConfidence >= 1; // Medium (1) or High (2)
-        }
-        
-        /// <summary>
-        /// ✅ Check if AmbushHotChoke is valid (RoomTracker-based)
-        /// </summary>
-        private bool IsAmbushHotChokeValid(RLStateKey state)
-        {
-            // ✅ Uses TransitionHeatGraph (RoomTracker), NOT IntersectionPoints
-            // Requires high heat confidence only
-            return state.heatConfidence >= 2; // Must be HIGH heat (2)
-        }
-        
-        /// <summary>
-        /// Get mask reason for action (debug)
-        /// </summary>
-        public string GetMaskReason(EnemyMode action)
-        {
-            if (maskReasons.ContainsKey(action))
-                return maskReasons[action];
-            
-            return "Valid";
-        }
-        
-        /// <summary>
-        /// Get all mask reasons (debug)
-        /// </summary>
-        public Dictionary<EnemyMode, string> GetAllMaskReasons()
-        {
-            return new Dictionary<EnemyMode, string>(maskReasons);
-        }
 
         /// <summary>
-        /// ✅ OVERLOAD: Get valid actions using SimpleRLStateKey (for SimpleStateExtractor)
-        /// Adapts heatNearbyBucket to heat confidence levels
+        /// Get valid actions for the current state
         /// </summary>
         public List<EnemyMode> GetValidActions(SimpleRLStateKey state)
         {
-            maskReasons.Clear();
-            
-            if (!enableMasking)
+            List<EnemyMode> validActions = new List<EnemyMode>();
+
+            // Always valid (Fallback)
+            validActions.Add(EnemyMode.Patrol);
+
+            // --- 1. ALWAYS ALLOWED (Autonomy) ---
+            // Allow checking room or spots anytime. If it's a waste of time, RL will learn negative reward.
+            validActions.Add(EnemyMode.SweepArea);
+            validActions.Add(EnemyMode.HideSpotCheck);
+
+            // --- 2. PLAYER PRESENCE LOGIC ---
+            // If Visible (0) -> Focus on Chase/Investigate
+            if (state.playerPresence == 0) 
             {
-                // No masking - all actions valid
-                return new List<EnemyMode>
-                {
-                    EnemyMode.Patrol,
-                    EnemyMode.InvestigateLastHeard,
-                    EnemyMode.HeatSearchPeak,
-                    EnemyMode.SweepArea,
-                    EnemyMode.HideSpotCheck,
-                    EnemyMode.HeatSweep,
-                    EnemyMode.AmbushHotChoke
-                };
+                validActions.Add(EnemyMode.InvestigateLastHeard);
+                // In visible state, we usually don't want to sweep/hide check, but let's allow Q-net to decide too?
+                // No, when visible, acting dumb is fatal. Keep strict for Visible only.
+                return new List<EnemyMode> { EnemyMode.InvestigateLastHeard, EnemyMode.Patrol }; 
             }
             
-            var validActions = new List<EnemyMode>();
-            
-            // ? Patrol (always valid)
-            if (patrolAlwaysValid)
-            {
-                validActions.Add(EnemyMode.Patrol);
-            }
-            
-            // ? InvestigateLastHeard (if recently heard)
-            if (state.timeSinceContactBucket <= 1) // 0=recent, 1=old, 2=very old
+            // If Heard Recent (1)
+            if (state.playerPresence == 1) 
             {
                 validActions.Add(EnemyMode.InvestigateLastHeard);
             }
-            
-            // ? HeatSearchPeak (if heat nearby is warm or hot)
-            if (state.heatNearbyBucket >= 1) // 0=cold, 1=warm, 2=hot
+
+            // --- 3. HEAT LOGIC (Relaxed) ---
+            // --- 3. HEAT LOGIC (Relaxed) ---
+            // Allow Choke Ambush / Heat Sweep if nearby is Warm(1)
+            if (state.heatNearby >= 1 || state.heatHere >= 1)
             {
-                validActions.Add(EnemyMode.HeatSearchPeak);
+                validActions.Add(EnemyMode.HeatSweep);     
+                validActions.Add(EnemyMode.AmbushHotChoke); 
             }
             
-            // ? SweepArea (always valid)
-            validActions.Add(EnemyMode.SweepArea);
+            // --- 4. GLOBAL AWARENESS ---
+            // HeatSearchPeak REMOVED (Redundant with HeatSweep)
+            // validActions.Add(EnemyMode.HeatSearchPeak);
             
-            // ? HideSpotCheck (if nearby hide spots or close)
-            if (state.distanceBucket <= 1) // Close to medium distance
+            // --- 5. PHASE LOGIC ---
+            if (state.strategicPhase == 1) // Panic/EndGame
             {
-                validActions.Add(EnemyMode.HideSpotCheck);
+               // Allow everything basically
+               if (!validActions.Contains(EnemyMode.AmbushHotChoke)) validActions.Add(EnemyMode.AmbushHotChoke);
             }
-            
-            // ? HeatSweep (if heat nearby is warm or hot)
-            if (state.heatNearbyBucket >= 1)
-            {
-                validActions.Add(EnemyMode.HeatSweep);
-            }
-            
-            // ? AmbushHotChoke (if heat nearby is warm or hot - >= 1, not just 2)
-            if (state.heatNearbyBucket >= 1)
-            {
-                validActions.Add(EnemyMode.AmbushHotChoke);
-            }
-            else
-            {
-                maskReasons[EnemyMode.AmbushHotChoke] = "Low heat nearby (requires heatNearbyBucket >= 1)";
-            }
-            
-            // ? Fallback: Ensure at least one action
-            if (validActions.Count == 0)
-            {
-                validActions.Add(EnemyMode.Patrol);
-            }
-            
+
             return validActions;
+        }
+
+        /// <summary>
+        /// Get valid action INDICES (for Q-Table lookup)
+        /// </summary>
+        public List<int> GetValidActionIndices(SimpleRLStateKey state)
+        {
+            var actions = GetValidActions(state);
+            List<int> indices = new List<int>();
+            foreach (var act in actions)
+            {
+                indices.Add((int)act);
+            }
+            return indices;
         }
     }
 }

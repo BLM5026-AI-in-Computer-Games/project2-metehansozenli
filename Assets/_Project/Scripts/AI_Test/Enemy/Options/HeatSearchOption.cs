@@ -16,7 +16,7 @@ namespace AITest.Enemy
     /// </summary>
     public class HeatSearchOption : BaseOption
     {
-        public override EnemyMode Mode => EnemyMode.HeatSearchPeak;
+        public override EnemyMode Mode => EnemyMode.HeatSweep;
         
         [Header("Heat Search Settings")]
         [Tooltip("Scan duration after arrival (seconds)")]

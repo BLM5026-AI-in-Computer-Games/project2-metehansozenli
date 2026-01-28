@@ -49,7 +49,7 @@ namespace AITest.Learning
         public int TotalUpdates => updatesPerformed;
         
         // Constants
-        private const int ActionCount = 7; // 7 active enum values (CutoffAmbush removed)
+        private const int ActionCount = 7; // Max Enum Value (6) + 1 = 7. (Indices: 0,1,3,4,5,6 valid)
 
         /// <summary>
         /// ? PROMPT 10: Choose action (?-greedy)
@@ -96,7 +96,7 @@ namespace AITest.Learning
                 {
                     EnemyMode.Patrol,
                     EnemyMode.InvestigateLastHeard,
-                    EnemyMode.HeatSearchPeak,
+                    // EnemyMode.HeatSearchPeak, // REMOVED
                     EnemyMode.SweepArea,
                     EnemyMode.HideSpotCheck,
                     EnemyMode.HeatSweep,
@@ -196,8 +196,12 @@ namespace AITest.Learning
                     if (!System.IO.File.Exists(logFilePath))
                         System.IO.File.WriteAllText(logFilePath, "Episode,Time,StateHash,Action,Reward,OldQ,NewQ,Delta\n");
                 }
-
-                string line = $"{episode},{time:F1},{state},{action},{reward:F2},{oldQ:F3},{newQ:F3},{delta:F4}\n";
+                
+                // Use InvariantCulture to ensure '.' is used for decimals, not ',' which breaks CSVs
+                string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, 
+                    "{0},{1:F1},{2},{3},{4:F2},{5:F3},{6:F3},{7:F4}\n",
+                    episode, time, state, action, reward, oldQ, newQ, delta);
+                    
                 System.IO.File.AppendAllText(logFilePath, line);
             }
             catch { /* Ignore IO errors in loop */ }

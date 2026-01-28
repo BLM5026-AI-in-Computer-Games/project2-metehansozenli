@@ -161,6 +161,33 @@ namespace AITest.Learning
             summary += $"Updates: {updateCount}, LR: {currentLearningRate:F4}";
             return summary;
         }
+        /// <summary>
+        /// Log weights to CSV (APPEND MODE)
+        /// Format: Time,W0,W1,W2,W3,W4,W5,W6,Bias
+        /// </summary>
+        public void LogWeightsToCSV(string filepath)
+        {
+            try
+            {
+                if (!System.IO.File.Exists(filepath))
+                {
+                    System.IO.File.WriteAllText(filepath, "Time,Heat,Dist,Check,HideDens,ProxHear,Central,Quest,Bias\n");
+                }
+
+                string line = $"{Time.time:F1}";
+                for (int i = 0; i < weights.Length; i++)
+                {
+                    line += $",{weights[i]:F4}";
+                }
+                line += $",{bias:F4}\n";
+
+                System.IO.File.AppendAllText(filepath, line);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[PerceptronScorer] Failed to log weights: {e.Message}");
+            }
+        }
     }
 
     /// <summary>

@@ -63,10 +63,10 @@ namespace AITest.Learning
         
         [Header("Training Settings")]
         [Tooltip("Total episodes to run (0 = infinite)")]
-        public int maxEpisodes = 500;
+        public int maxEpisodes = 1000;
         
         [Tooltip("Time scale during training (higher = faster)")]
-        [Range(1f, 10f)] public float trainingTimeScale = 1f;
+        [Range(1f, 100f)] public float trainingTimeScale = 1f;
         
         [Header("Rewards")]
         [Tooltip("Reward for catching player")]
@@ -170,6 +170,12 @@ namespace AITest.Learning
             EndEpisode("QUEST COMPLETED (Player Wins)", false); // false = enemy failed
         }
 
+        [Header("Experiment Settings")]
+        [Tooltip("If true, use fixed seed for reproducibility")]
+        public bool useRandomSeed = false;
+        [Tooltip("Seed value (e.g. 42, 123, 999)")]
+        public int randomSeed = 42;
+
         #region Training Control
 
         /// <summary>
@@ -181,6 +187,19 @@ namespace AITest.Learning
             {
                 Debug.LogWarning("[EpisodeManager] Training already running!");
                 return;
+            }
+
+            // ✅ SEED INITIALIZATION
+            if (useRandomSeed)
+            {
+                UnityEngine.Random.InitState(randomSeed);
+                Debug.Log($"<color=magenta>[EXP] Initialized Random Seed: {randomSeed}</color>");
+            }
+            else
+            {
+                // Capture the random seed used (for logging)
+                randomSeed = (int)System.DateTime.Now.Ticks;
+                // Don't re-init random here, just use whatever Unity has, but record it.
             }
             
             isTraining = true;
@@ -255,6 +274,14 @@ namespace AITest.Learning
             }
             
             StopTraining();
+            
+            // ✅ AUTO-QUIT application/playmode after training
+            Debug.Log("<color=red>[EpisodeManager] Auto-quitting application...</color>");
+            #if UNITY_EDITOR
+                UnityEditor.EditorApplication.isPlaying = false;
+            #else
+                Application.Quit();
+            #endif
         }
 
         #endregion
@@ -276,6 +303,12 @@ namespace AITest.Learning
             if (questManager != null)
             {
                 questManager.ResetForTrainingEpisode(restartQuest: true);
+            }
+
+            // ✅ Reset Heat Graph (Avoid persistence across episodes)
+            if (AITest.Heat.TransitionHeatGraph.Instance)
+            {
+                AITest.Heat.TransitionHeatGraph.Instance.ClearAllHeat();
             }
             
             // Randomize positions (optional)
@@ -303,8 +336,7 @@ namespace AITest.Learning
             }
             
             // ✅ Notify MetricsManager of episode start
-            int seed = UnityEngine.Random.Range(0, 100000);
-            
+            // Use the global experiment seed for tracking, or a combined hash
             // ? RESET PLAYER BOT
             var playerBot = playerTransform.GetComponent<PlayerTrainingBotController>();
             // Also try GetComponent in root just in case
@@ -312,10 +344,11 @@ namespace AITest.Learning
 
             if (playerBot != null)
             {
-                playerBot.ResetForNewEpisode(seed);
+                // Deterministic seed per episode
+                playerBot.ResetForNewEpisode(randomSeed + currentEpisode);
             }
             
-            MetricsHooks.EpisodeStart(seed, "default", EpisodeMode.TRAIN, 
+            MetricsHooks.EpisodeStart(randomSeed, "default", EpisodeMode.TRAIN, 
                 enemyBrain != null && enemyBrain.qLearningPolicy != null ? enemyBrain.qLearningPolicy.epsilon : 0.1f);
             
             // Reset enemy state
@@ -545,6 +578,35 @@ namespace AITest.Learning
             {
                 Debug.Log($"<color=yellow>[Episode {currentEpisode}] {enemyBrain.qLearningPolicy.GetStatsSummary()}</color>");
             }
+            
+            // ✅ LOG METRICS TO CSV
+            LogEpisodeMetrics(reason, success);
+        }
+
+        /// <summary>
+        /// Log Episode Metrics to CSV for Graphs
+        /// </summary>
+        private void LogEpisodeMetrics(string result, bool success)
+        {
+            string dir = System.IO.Path.Combine(Application.dataPath, "../TrainingData");
+            if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+            string path = System.IO.Path.Combine(dir, "episode_metrics.csv");
+
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                    System.IO.File.WriteAllText(path, "Episode,Seed,Duration,Steps,Reward,Result,Success\n");
+
+                string line = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "{0},{1},{2:F2},{3},{4:F2},{5},{6}\n",
+                    currentEpisode, randomSeed, episodeElapsedTime, episodeSteps, episodeTotalReward, result, success ? 1 : 0);
+
+                System.IO.File.AppendAllText(path, line);
+            }
+            catch(System.Exception e)
+            {
+                Debug.LogWarning($"[EpisodeManager] Failed to log metrics: {e.Message}");
+            }
         }
 
         #endregion
@@ -554,10 +616,21 @@ namespace AITest.Learning
         /// <summary>
         /// Check if enemy captured player
         /// </summary>
+        /// <summary>
+        /// Check if enemy captured player
+        /// </summary>
         private void CheckCaptureCondition()
         {
             if (!enemyTransform || !playerTransform) return;
             
+            // ? FIX: Don't capture if player is hiding (SpriteRenderer disabled)
+            // The 'HideSpotCheckOption' will handle capturing hidden players by forcing them out first.
+            var playerRenderer = playerTransform.GetComponentInChildren<SpriteRenderer>();
+            if (playerRenderer != null && !playerRenderer.enabled)
+            {
+                return; // Player is hidden, safe from proximity capture
+            }
+
             float distance = Vector2.Distance(enemyTransform.position, playerTransform.position);
             
             if (distance < captureDistance)
